@@ -3,7 +3,9 @@
 Created on Tue Jul 23 12:09:08 2019
  
 Histogram Variational Autoencoder (VAE) for 1D, 2D, and 3D data.
-route0
+
+route2
+- add dropout layer
 
 @author: tadahaya
 """
@@ -35,16 +37,15 @@ class ResidualConvBlock(nn.Module):
     Convolutional block with residual connection (for Encoder)
 
     """
-    def __init__(self, in_channels, out_channels, kernel_size, stride, padding, dim):
+    def __init__(self, in_channels, out_channels, kernel_size, stride, padding, dim, dropout_conv=0.3):
         super().__init__()
         Conv = get_conv_layer(dim)
         BatchNorm = get_batchnorm_layer(dim)
-
         self.conv1 = Conv(in_channels, out_channels, kernel_size, stride, padding)
         self.bn1 = BatchNorm(out_channels)
+        self.dropout = nn.Dropout(dropout_conv) if dropout_conv > 0 else nn.Identity()
         self.conv2 = Conv(out_channels, out_channels, kernel_size=3, stride=1, padding=1)
         self.bn2 = BatchNorm(out_channels)
-
         self.skip = nn.Sequential()
         if in_channels != out_channels or stride != 1:
             # dimension adjustment for skip connection (if needed)
@@ -56,6 +57,7 @@ class ResidualConvBlock(nn.Module):
     def forward(self, x):
         identity = self.skip(x)
         out = F.relu(self.bn1(self.conv1(x)))
+        out = self.dropout(out)  # Apply dropout after the first convolution
         out = self.bn2(self.conv2(out))
         out += identity
         return F.relu(out)
@@ -66,16 +68,18 @@ class ResidualConvTransposeBlock(nn.Module):
     Deconvolutional block with residual connection (for Decoder)
  
     """
-    def __init__(self, in_channels, out_channels, kernel_size, stride, padding, dim, activation="relu"):
+    def __init__(
+            self, in_channels, out_channels, kernel_size, stride, padding,
+            dim, dropout_conv=0.3, activation="relu"
+            ):
         super().__init__()
         ConvT = get_conv_transpose_layer(dim)
         BatchNorm = get_batchnorm_layer(dim)
-
         self.convt1 = ConvT(in_channels, out_channels, kernel_size, stride, padding)
         self.bn1 = BatchNorm(out_channels)
+        self.dropout = nn.Dropout(dropout_conv) if dropout_conv > 0 else nn.Identity()
         self.convt2 = ConvT(out_channels, out_channels, kernel_size=3, stride=1, padding=1)
         self.bn2 = BatchNorm(out_channels)
-
         self.skip = nn.Sequential()
         if in_channels != out_channels or stride != 1:
             self.skip = nn.Sequential(
@@ -89,6 +93,7 @@ class ResidualConvTransposeBlock(nn.Module):
     def forward(self, x):
         identity = self.skip(x)
         out = F.relu(self.bn1(self.convt1(x)))
+        out = self.dropout(out)  # Apply dropout after the first deconvolution
         out = self.bn2(self.convt2(out))
         out += identity
         return self.activation(out)
