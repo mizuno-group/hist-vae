@@ -19,12 +19,12 @@ import os, yaml
 import inspect
 from datetime import datetime
 
-from .src.barlow import BarlowTwins, LinearHead
+from .src.models import ConvVAE, vae_loss
 from .src.trainer import PreTrainer, Trainer
 from .src.data_handler import PointHistDataset, prep_dataloader, plot_hist
 from .src.utils import fix_seed
 
-class PHTwins:
+class HistVAE:
     """ class for training and prediction """
     def __init__(
             self, config_path: str, df: pd.DataFrame=None, test_df:pd.DataFrame=None,

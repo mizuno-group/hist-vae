@@ -182,6 +182,7 @@ class PointHistDataset(Dataset):
         except ValueError:
             pass # if label is None
         return (hist0, hist1), label
+        # hist0, original; hist1, noisy
     
     def get_meta(self) -> pd.DataFrame:
         """

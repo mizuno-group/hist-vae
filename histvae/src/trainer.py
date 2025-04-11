@@ -13,27 +13,28 @@ from torch.nn.utils import clip_grad_norm_
 
 from .utils import save_experiment, save_checkpoint, calc_elapsed_time
 
-
 class BaseTrainer:
     def __init__(self):
         self.callbacks: List[Any] = []
 
-    def train(self, trainloader, testloader):
+    def train(self):
         """ train the model """
         raise NotImplementedError
     
-    def train_epoch(self, trainloader):
+    def train_epoch(self):
         """ train the model for one epoch """
         raise NotImplementedError
 
-    def evaluate(self, testloader):
+    def evaluate(self):
         """ evaluate the model """
         raise NotImplementedError
 
     def set_callbacks(self, callbacks: Union[List[Any], Any]):
         """
-        Args:
-            callbacks (list, instance): list of callback instances or a single callback instance
+        Parameters
+        ----------
+        callbacks: list, instance
+            list of callback instances or a single callback instance
 
         """
         if not isinstance(callbacks, list):
@@ -46,11 +47,12 @@ class BaseTrainer:
 
     def run_callbacks(self, **kwargs):
         """
-        Args:
-            callbacks (list): list of callback instances
-            kwargs (dict): keyword arguments to pass to the callbacks
+        Parameters
+        ----------
+        kwargs: dict
+            keyword arguments to pass to the callbacks
 
-        """
+        """        
         for callback in self.callbacks:
             callback(**kwargs)
 
@@ -77,10 +79,17 @@ class BaseLogger:
 class EarlyStopping:
     def __init__(self, patience=10, mode="min", restore_best_model=True, verbose=True):
         """
-        Args:
-            patience (int): epoch for which the monitored value is not improved
-            mode (str): "min" or "max" (loss or accuracy)
-            restore_best_model (bool): restore the best model
+        Parameters
+        ----------
+        patience: int
+            number of epochs with no improvement after which training will be stopped
+
+        mode: str
+            one of {min, max}.
+
+        restore_best_model: bool
+            whether to restore model weights from the epoch with the best score
+
         """
         self.patience = patience
         self.restore_best_model = restore_best_model
@@ -207,11 +216,16 @@ class PreTrainer(BaseTrainer):
         # initialize the gradients
         self.optimizer.zero_grad()
         for i, (data, label) in enumerate(trainloader):
-            # data = (hist, hist)
+            # data = (original hist, noisy hist)
             hist0, hist1 = (x.to(self.device) for x in data)
             label = label.to(self.device)
-            # forward/loss calculation
-            _, loss = self.model(hist0, hist1) # output, bt_loss
+            # forward
+            recon, mu, logvar = self.model(hist1) # output, mu, logvar
+            # loss calculation
+            loss, recon_loss, kl_loss = vae_loss(
+                recon, hist0, mu, logvar, beta=self.config["beta"]
+                )
+
             # note: loss is averaged over the batch
             # backpropagation
             loss.backward()

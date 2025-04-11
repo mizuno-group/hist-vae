@@ -1,4 +1,4 @@
-# phtwins config file (yaml)
+# config file (yaml)
 # === I/O ===
 device: null
 exp_name: null
@@ -7,19 +7,11 @@ num_points: 2048
 bins: 64
 num_workers: 4
 pin_memory: True
-# === Barlow Twins ===
+# === Conv VAE ===
 latent_dim: 128
-hidden_proj: 512
-output_proj: 128
-num_proj: 2
-lambd: 0.01
-scale_factor: 1.0
-# === HistEncoder ===
-hist_dim: 2 # this is the same as input_dim
-hidden_hist: 64
-num_blocks: 4
-# output_hist: 128 # this is the same as latent_dim
-dropout_hist: 0.3
+hidden_dims: [32, 64, 128, 256]
+dropout_conv: 0.3
+beta: 1.0
 # === Linear head ===
 # latent_dim: 128
 num_classes: 2
