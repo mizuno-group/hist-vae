@@ -79,7 +79,7 @@ class HistVAE:
         # prepare linear head
         model_params = inspect.signature(LinearHead.__init__).parameters
         model_args = {k: self.config[k] for k in model_params if k in self.config}
-        self.finetuned_model = LinearHead(**model_args)
+        self.finetuned_model = LinearHead(self.pretrained, **model_args)
         for param in self.finetuned_model.parameters():
             param.requires_grad = True
         optimizer1 = RAdamScheduleFree(self.finetuned_model.parameters(), lr=float(self.config["lr"]), betas=(0.9, 0.999))
