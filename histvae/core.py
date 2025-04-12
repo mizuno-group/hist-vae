@@ -130,7 +130,7 @@ class HistVAE:
             print(">> Finetuning is done.")
 
 
-    # ToDo: implement this
+    # ToDo: check this
     def predict(self, data_loader=None):
         """ prediction """
         if data_loader is None:
@@ -140,13 +140,16 @@ class HistVAE:
         self.finetuned_model.eval()
         preds = []
         probs = []
+        labels = []
         with torch.no_grad():
-            for data, _ in data_loader:
-                data = data.to(self.device)
-                output = self.model(data)[0] # ToDo: check this
-                preds.append(output.argmax(dim=1).cpu().numpy())
-                probs.append(output.cpu().numpy())
-        return np.concatenate(preds), np.concatenate(probs)
+            for data, label in data_loader:
+                hist0, hist1 = (x.to(self.device) for x in data)
+                label = label.to(self.device)
+                logits, recon, mu, logvar = self.finetuned_model(hist0) # use original hist
+                preds.append(logits.argmax(dim=1).cpu().numpy())
+                probs.append(logits.cpu().numpy())
+                labels.append(label.cpu().numpy())
+        return np.concatenate(preds), np.concatenate(probs), np.concatenate(labels)
 
 
     def get_representation(self, dataset=None, indices:list=[]):
@@ -168,9 +171,8 @@ class HistVAE:
             for i in indices:
                 data, _ = dataset[i]
                 hist0, hist1 = (x.to(self.device).unsqueeze(0) for x in data)  # add batch dimension
-                (z1, z2), _ = self.pretrained_model(hist0, hist1)
-                output = (z1 + z2) / 2  # average two features
-                reps.append(output.cpu().numpy().reshape(1, -1))  # del batch dimension
+                mu, logvar = self.pretrained_model.encode(hist0) # use original hist
+                reps.append(mu.cpu().numpy().reshape(1, -1))  # del batch dimension
         return np.vstack(reps)
 
 
