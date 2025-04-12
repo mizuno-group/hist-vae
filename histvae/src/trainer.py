@@ -179,10 +179,18 @@ class PreTrainer(BaseTrainer):
         start_time = time.time()
         # training
         for i in range(self.config["epochs"]):
-            train_loss = self.train_epoch(trainloader)
-            test_loss = self.evaluate(testloader)
+            train_loss, train_recon, train_kl = self.train_epoch(trainloader)
+            test_loss, test_recon, test_kl = self.evaluate(testloader)
             # logging
-            self.run_callbacks(epoch=i + 1, train_loss=train_loss, test_loss=test_loss)
+            self.run_callbacks(
+                epoch=i + 1,
+                train_loss=train_loss,
+                test_loss=test_loss,
+                train_recon=train_recon,
+                train_kl=train_kl,
+                test_recon=test_recon,
+                test_kl=test_kl
+                )
             if (i + 1) % self.log_every == 0:
                 print(
                     f"Epoch: {i + 1}, Train loss: {train_loss:.4f}, Test loss: {test_loss:.4f}"
@@ -212,6 +220,8 @@ class PreTrainer(BaseTrainer):
         self.model.train()
         self.optimizer.train()
         total_loss = 0.0
+        total_recon_loss = 0.0
+        total_kl_loss = 0.0
         total_samples = 0 # for averaging the loss
         # initialize the gradients
         self.optimizer.zero_grad()
@@ -222,10 +232,9 @@ class PreTrainer(BaseTrainer):
             # forward
             recon, mu, logvar = self.model(hist1) # output, mu, logvar
             # loss calculation
-            loss, recon_loss, kl_loss = vae_loss(
+            loss, recon_loss, kl_loss = self.model.vae_loss(
                 recon, hist0, mu, logvar, beta=self.config["beta"]
                 )
-
             # note: loss is averaged over the batch
             # backpropagation
             loss.backward()
@@ -238,26 +247,36 @@ class PreTrainer(BaseTrainer):
                 self.optimizer.zero_grad()  # Reset gradients for the next accumulation
             batch_size = hist0.shape[0]
             total_loss += loss.detach().item() * batch_size
+            total_recon_loss += recon_loss.detach().item() * batch_size
+            total_kl_loss += kl_loss.detach().item() * batch_size
             total_samples += batch_size
-        return total_loss / total_samples
+        return total_loss / total_samples, total_recon_loss / total_samples, total_kl_loss / total_samples
 
 
     def evaluate(self, testloader):
         self.model.eval()
         self.optimizer.eval()
         total_loss = 0.0
+        total_recon_loss = 0.0
+        total_kl_loss = 0.0
         total_samples = 0 # for averaging the loss
         with torch.no_grad():
             for data, label in testloader:
                 hist0, hist1 = (x.to(self.device) for x in data)
                 label = label.to(self.device)
-                # forward/loss calculation
-                _, loss = self.model(hist0, hist1) # output, bt_loss
+                # forward
+                recon, mu, logvar = self.model(hist1) # output, mu, logvar
+                # loss calculation
+                loss, recon_loss, kl_loss = self.model.vae_loss(
+                    recon, hist0, mu, logvar, beta=self.config["beta"]
+                    )
                 # Loss accumulation
                 batch_size = hist0.shape[0]
                 total_loss += loss.item() * batch_size # detach() is not necessary
+                total_recon_loss += recon_loss.item() * batch_size
+                total_kl_loss += kl_loss.item() * batch_size
                 total_samples += batch_size
-        return total_loss / total_samples
+        return total_loss / total_samples, total_recon_loss / total_samples, total_kl_loss / total_samples
 
 
 class Trainer(BaseTrainer):
@@ -306,12 +325,19 @@ class Trainer(BaseTrainer):
         start_time = time.time()
         # training
         for i in range(self.config["epochs"]):
-            train_loss, train_acc = self.train_epoch(trainloader)
-            test_loss, test_acc = self.evaluate(testloader)
+            train_loss, train_recon, train_kl, train_acc = self.train_epoch(trainloader)
+            test_loss, test_recon, test_kl, test_acc = self.evaluate(testloader)
             # logging
             self.run_callbacks(
-                epoch=i + 1, train_loss=train_loss, test_loss=test_loss, 
-                train_accuracy=train_acc, test_accuracy=test_acc
+                epoch=i + 1,
+                train_loss=train_loss,
+                test_loss=test_loss,
+                train_recon=train_recon,
+                train_kl=train_kl,
+                test_recon=test_recon,
+                test_kl=test_kl,
+                train_accuracy=train_acc,
+                test_accuracy=test_acc,
                 )
             if (i + 1) % self.log_every == 0:
                 print(f"Epoch: {i + 1}")
@@ -342,17 +368,30 @@ class Trainer(BaseTrainer):
         self.model.train()
         self.optimizer.train()
         total_loss = 0.0
+        total_pt_loss = 0.0
+        total_ft_loss = 0.0
         total_samples = 0 # for averaging the loss
         correct = 0
         # initialize the gradients
         self.optimizer.zero_grad()
         for i, (data, label) in enumerate(trainloader):
+            # data = (original hist, noisy hist)
             hist0, hist1 = (x.to(self.device) for x in data)
             label = label.to(self.device)
-            # forward calculation
-            output, pt_loss = self.model(hist0, hist1)
-            ft_loss = self.loss_fn(output, label)
-            loss = pt_loss + ft_loss if self.use_pretrain_loss else ft_loss
+            # forward/loss calculation
+            if self.use_pretrain_loss:
+                logits, recon, mu, logvar = model(hist1) # use noisy hist for pretraining
+                pt_loss, _, _ = self.model.vae_loss(
+                    recon, hist0, mu, logvar, beta=self.config["beta"]
+                    )
+                # note: ignore the reconstruction loss and kl_loss in logging
+                ft_loss = self.loss_fn(logits, label)
+                loss = pt_loss + ft_loss
+            else:
+                logits, recon, mu, logvar = model(hist0) # use original hist
+                ft_loss = self.loss_fn(logits, label)
+                pt_loss = 0
+                loss = ft_loss
             # backpropagation
             loss.backward()
             # clip the gradients
@@ -370,7 +409,7 @@ class Trainer(BaseTrainer):
             with torch.no_grad():
                 predictions = torch.argmax(output, dim=1)
                 correct += (predictions == label).sum().item()
-        return total_loss / total_samples, correct / total_samples
+        return total_loss / total_samples, total_pt_loss / total_samples, total_ft_loss / total_samples, correct / total_samples
             
 
     def evaluate(self, testloader):
@@ -378,6 +417,8 @@ class Trainer(BaseTrainer):
         self.model.eval()
         self.optimizer.eval()
         total_loss = 0.0
+        total_pt_loss = 0.0
+        total_ft_loss = 0.0
         total_samples = 0
         correct = 0
         with torch.no_grad():
@@ -385,10 +426,20 @@ class Trainer(BaseTrainer):
                 # Move data to device
                 hist0, hist1 = (x.to(self.device) for x in data)
                 label = label.to(self.device)
-                # Forward pass
-                output, pt_loss = self.model(hist0, hist1)
-                ft_loss = self.loss_fn(output, label)
-                loss = pt_loss + ft_loss if self.use_pretrain_loss else ft_loss
+                # forward/loss calculation
+                if self.use_pretrain_loss:
+                    logits, recon, mu, logvar = model(hist1) # use noisy hist for pretraining
+                    pt_loss, _, _ = self.model.vae_loss(
+                        recon, hist0, mu, logvar, beta=self.config["beta"]
+                        )
+                    # note: ignore the reconstruction loss and kl_loss in logging
+                    ft_loss = self.loss_fn(logits, label)
+                    loss = pt_loss + ft_loss
+                else:
+                    logits, recon, mu, logvar = model(hist0) # use original hist
+                    ft_loss = self.loss_fn(logits, label)
+                    pt_loss = 0
+                    loss = ft_loss
                 # Loss accumulation
                 batch_size = hist0.shape[0]
                 total_loss += loss.item() * batch_size # detach() is not necessary
@@ -396,4 +447,4 @@ class Trainer(BaseTrainer):
                 # Accuracy calculation
                 predictions = torch.argmax(output, dim=1)
                 correct += int((predictions == label).sum())
-        return total_loss / total_samples, correct / total_samples
+        return total_loss / total_samples, total_pt_loss / total_samples, total_ft_loss / total_samples, correct / total_samples

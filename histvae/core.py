@@ -19,7 +19,7 @@ import os, yaml
 import inspect
 from datetime import datetime
 
-from .src.models import ConvVAE, vae_loss
+from .src.models import ConvVAE, LinearHead
 from .src.trainer import PreTrainer, Trainer
 from .src.data_handler import PointHistDataset, prep_dataloader, plot_hist
 from .src.utils import fix_seed
@@ -64,18 +64,9 @@ class HistVAE:
         
         """
         # prepare pretraining model
-        self.pretrained_model = BarlowTwins(
-            input_dim=self.config["hist_dim"], # the dimension of the input
-            hidden_hist=self.config["hidden_hist"], # the dimension of the hidden layer
-            dropout_hist=self.config["dropout_hist"], # the dropout rate
-            num_blocks=self.config["num_blocks"], # the number of blocks in the ResNet
-            latent_dim=self.config["latent_dim"], # the dimension of the latent representation
-            hidden_proj=self.config["hidden_proj"], # the dimension of the hidden layer
-            output_proj=self.config["output_proj"], # the dimension of the output layer
-            num_proj=self.config["num_proj"], # the number of the projection MLPs
-            lambd=self.config["lambd"], # tradeoff parameter
-            scale_factor=self.config["scale_factor"] # factor to scale the loss by
-        )
+        model_params = inspect.signature(ConvVAE.__init__).parameters
+        model_args = {k: self.config[k] for k in model_params if k in self.config}
+        self.pretrained_model = ConvVAE(**model_args)
         for param in self.pretrained_model.parameters():
             param.requires_grad = True
         optimizer0 = RAdamScheduleFree(self.pretrained_model.parameters(), lr=float(self.config["lr"]), betas=(0.9, 0.999))
@@ -84,15 +75,9 @@ class HistVAE:
             )
         self.optimizer["pretraining"] = optimizer0
         # prepare linear head
-        self.finetuned_model = LinearHead(
-            self.pretrained_model, # the pre-trained model
-            self.config["latent_dim"], # the dimension of the latent representation
-            self.config["num_classes"], # the number of classes
-            self.config["num_layers"], # the number of layers in the MLP
-            self.config["hidden_head"], # the number of hidden units in the MLP
-            self.config["dropout_head"], # the dropout rate
-            self.config["frozen"] # whether the pretrained model is frozen
-        )
+        model_params = inspect.signature(LinearHead.__init__).parameters
+        model_args = {k: self.config[k] for k in model_params if k in self.config}
+        self.finetuned_model = LinearHead(**model_args)
         for param in self.finetuned_model.parameters():
             param.requires_grad = True
         optimizer1 = RAdamScheduleFree(self.finetuned_model.parameters(), lr=float(self.config["lr"]), betas=(0.9, 0.999))
@@ -261,11 +246,8 @@ class HistVAE:
         if config_path is not None:
             with open(config_path, "r") as f:
                 self.config = yaml.safe_load(f)
-        # initialize BarlowTwins model
-        model_params = inspect.signature(BarlowTwins.__init__).parameters
-        model_args = {k: self.config[k] for k in model_params if k in self.config}
-        model_args["input_dim"] = self.config["hist_dim"] # hard coded
-        self.pretrained_model = BarlowTwins(**model_args)
+        # initialize model
+        self.init_model()
         # load model
         checkpoint = torch.load(model_path)
         if "model" in checkpoint:
@@ -279,16 +261,8 @@ class HistVAE:
         if config_path is not None:
             with open(config_path, "r") as f:
                 self.config = yaml.safe_load(f)
-        # initialize BarlowTwins model
-        bt_params = inspect.signature(BarlowTwins.__init__).parameters
-        bt_args = {k: self.config[k] for k in bt_params if k in self.config}
-        bt_args["input_dim"] = self.config["hist_dim"] # hard coded
-        init_bt_model = BarlowTwins(**bt_args)
-        # initialize LinearHead model
-        lh_params = inspect.signature(LinearHead.__init__).parameters
-        lh_args = {k: self.config[k] for k in lh_params if k in self.config}
-        lh_args["pretrained"] = init_bt_model # hard coded
-        self.finetuned_model = LinearHead(**lh_args)
+        # initialize model
+        self.init_model()
         # load model
         checkpoint = torch.load(model_path)
         if "model" in checkpoint:
