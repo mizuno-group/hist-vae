@@ -42,7 +42,9 @@ class HistVAE:
         self.config_path = config_path
         if exp_name is None:
             exp_name = f"exp-{datetime.today().strftime('%y%m%d')}"
-        self.config["exp_name"] = exp_name            
+        self.config["exp_name"] = exp_name
+        tmp = [self.config["in_channels"]] + [self.config["bins"]] * (self.config["in_dims"])
+        self.config["input_shape"] = tuple(tmp)
         self.outdir = outdir
         # initialize
         self.pretrained_model = None
