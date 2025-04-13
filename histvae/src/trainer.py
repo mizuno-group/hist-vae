@@ -279,7 +279,7 @@ class PreTrainer(BaseTrainer):
         return total_loss / total_samples, total_recon_loss / total_samples, total_kl_loss / total_samples
 
 
-class Trainer(BaseTrainer):
+class FineTuner(BaseTrainer):
     def __init__(self, config, model, optimizer=None, loss_fn=None, callbacks=[], outdir=""):
         super().__init__()
         # arguments

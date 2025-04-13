@@ -25,10 +25,6 @@ from .src.data_handler import PointHistDataset, prep_dataloader, plot_hist
 from .src.utils import fix_seed
 
 class BaseCore:
-    def __init__(self):
-        pass
-
-class HistVAE:
     """ class for training and prediction """
     def __init__(
             self, config_path: str, df: pd.DataFrame=None, test_df:pd.DataFrame=None,
@@ -60,7 +56,7 @@ class HistVAE:
         g, seed_worker = fix_seed(seed, fix_cuda=True)
         self._seed = {"seed": seed, "g": g, "seed_worker": seed_worker}
         # prepare model
-        self.init_pretrained_model()
+        self.init_model()
         self.init_finetuned_model()
 
 

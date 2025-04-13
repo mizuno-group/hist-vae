@@ -284,3 +284,18 @@ def prep_dataloader(
         worker_init_fn=seed_worker,
         )    
     return loader
+
+
+# ToDo: implement a factory class for dataset
+class DatasetFactory:
+    @staticmethod
+    def get_dataset(mode:str, **kwargs) -> PointHistDataset:
+        """
+        Get the dataset class based on the mode.
+        """
+        if mode == "pretrain":
+            return PointHistDataset(**kwargs)
+        elif mode == "finetune":
+            return PointHistDataset(**kwargs)
+        else:
+            raise ValueError(f"!! Unknown mode: {mode}. Use 'pretrain' or 'finetune'. !!")
