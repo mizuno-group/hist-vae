@@ -56,10 +56,11 @@ class HistVAE:
         g, seed_worker = fix_seed(seed, fix_cuda=True)
         self._seed = {"seed": seed, "g": g, "seed_worker": seed_worker}
         # prepare model
-        self.init_model()
+        self.init_pretrained_model()
+        self.init_finetuned_model()
 
 
-    def init_model(self):
+    def init_pretrained_model(self):
         """
         prepare model
         hard coded parameters
@@ -71,27 +72,37 @@ class HistVAE:
         self.pretrained_model = ConvVAE(**model_args)
         for param in self.pretrained_model.parameters():
             param.requires_grad = True
-        optimizer0 = RAdamScheduleFree(self.pretrained_model.parameters(), lr=float(self.config["lr"]), betas=(0.9, 0.999))
+        optimizer = RAdamScheduleFree(self.pretrained_model.parameters(), lr=float(self.config["lr"]), betas=(0.9, 0.999))
         self.pretrainer = PreTrainer(
-            self.config, self.pretrained_model, optimizer0, outdir=self.outdir
+            self.config, self.pretrained_model, optimizer, outdir=self.outdir
             )
-        self.optimizer["pretraining"] = optimizer0
+        self.optimizer["pretraining"] = optimizer
+
+
+    def init_finetuned_model(self):
+        """
+        prepare model
+        hard coded parameters
+        
+        """
         # prepare linear head
         model_params = inspect.signature(LinearHead.__init__).parameters
         model_args = {k: self.config[k] for k in model_params if k in self.config}
         self.finetuned_model = LinearHead(self.pretrained_model, **model_args)
         for param in self.finetuned_model.parameters():
             param.requires_grad = True
-        optimizer1 = RAdamScheduleFree(self.finetuned_model.parameters(), lr=float(self.config["lr"]), betas=(0.9, 0.999))
+        optimizer = RAdamScheduleFree(self.finetuned_model.parameters(), lr=float(self.config["lr"]), betas=(0.9, 0.999))
         loss_fn = nn.CrossEntropyLoss() # hard coded
         self.trainer = Trainer(
-            self.config, self.finetuned_model, optimizer1, loss_fn, outdir=self.outdir
+            self.config, self.finetuned_model, optimizer, loss_fn, outdir=self.outdir
             )
-        self.optimizer["finetuning"] = optimizer1
+        self.optimizer["finetuning"] = optimizer
 
 
-    def prep_data(self, key_identify:str, key_data:list, key_label:str):
+    def prep_data(self, key_identify:str, key_data:list, key_label:str, force_no_transform:bool=False):
         """ prepare data """
+        t = self.config["transform_2d"] if not force_no_transform else False
+        # force no transform when finetuning
         self.train_dataset = PointHistDataset(
             df=self.df,
             key_identify=key_identify,
@@ -99,7 +110,7 @@ class HistVAE:
             key_label=key_label,
             num_points=self.config["num_points"],
             bins=self.config["bins"],
-            transform_2d=self.config["transform_2d"]
+            transform_2d=t
         )
         train_loader = prep_dataloader(
             self.train_dataset, self.config["batch_size"], True, self.config["num_workers"],
@@ -132,7 +143,7 @@ class HistVAE:
         if verbose:
             print(">> Pretraining is done.")
 
-    # ToDo: check this in transform_2d is True
+
     def finetune(self, train_loader, test_loader, callbacks:list=None, verbose:bool=True):
         """ finetuning """
         if callbacks is not None:

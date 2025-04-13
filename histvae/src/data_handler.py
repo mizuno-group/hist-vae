@@ -242,6 +242,11 @@ class PointHistDataset(Dataset):
         return rotated_scaled0.squeeze(0), rotated_scaled1.squeeze(0)
     
 
+    def _off_transform(self):
+        """ switch off the transform function """
+        self.transform = lambda x, y: (x, y)
+
+
 def prep_dataloader(
     dataset, batch_size, shuffle=None, num_workers=2, pin_memory=True,
     g=None, seed_worker=None
