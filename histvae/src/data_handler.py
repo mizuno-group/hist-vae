@@ -8,10 +8,12 @@ data handler
 """
 import numpy as np
 import pandas as pd
+import random
 import matplotlib.pyplot as plt
 
 import torch
 from torch.utils.data import Dataset, DataLoader
+import torchvision.transforms.functional as TF
 
 def calc_hist(X, bins=16) -> np.ndarray:
     try:
@@ -93,6 +95,7 @@ def plot_hist(hist_list, output="", **plot_params):
     plt.close()
 
 
+# ToDo: transformの部分をrotate_scale_2dに変更する
 class PointHistDataset(Dataset):
     def __init__(
             self, df, key_identify, key_data, key_label, num_points=768, bins=16,
@@ -209,6 +212,32 @@ class PointHistDataset(Dataset):
         hist += noise
         return np.clip(hist, 0.0, None)
 
+
+    def rotate_scale_2d(hist0, hist1, angle_range=(-180,180), scale_range=(0.8,1.2)):
+        """
+        Parameters
+        ----------
+        hist0, hist1: torch.Tensor
+            2D histogram to be rotated and scaled
+
+        angle_range: tuple
+            range of rotation angle (degree)
+
+        scale_range: tuple
+            range of scale factor
+
+        """
+        # sample random angle and scale
+        angle = random.uniform(*angle_range)
+        scale = random.uniform(*scale_range)
+        # convert to (C, H, W) format for PyTorch
+        hist0 = hist0.unsqueeze(0)  # (1, H, W)
+        hist1 = hist1.unsqueeze(0)  # (1, H, W)
+        # rotate and scale
+        rotated_scaled0 = TF.affine(hist0, angle=angle, translate=(0,0), scale=scale, shear=0)
+        rotated_scaled1 = TF.affine(hist1, angle=angle, translate=(0,0), scale=scale, shear=0)
+        return rotated_scaled0.squeeze(0), rotated_scaled1.squeeze(0)
+    
 
 def prep_dataloader(
     dataset, batch_size, shuffle=None, num_workers=2, pin_memory=True,
