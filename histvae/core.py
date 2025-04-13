@@ -24,6 +24,288 @@ from .src.trainer import PreTrainer, Trainer
 from .src.data_handler import PointHistDataset, prep_dataloader, plot_hist
 from .src.utils import fix_seed
 
+class BaseCore:
+    def __init__(self):
+        pass
+
+class HistVAE:
+    """ class for training and prediction """
+    def __init__(
+            self, config_path: str, df: pd.DataFrame=None, test_df:pd.DataFrame=None,
+            outdir: str=None, exp_name: str=None, seed: int=42
+            ):
+        # arguments
+        assert outdir is not None, "!! Give outdir !!"
+        self.df = df # DataFrame containing the point data and label
+        self.test_df = test_df # DataFrame containing the point data and label
+        self.train_dataset = None
+        self.test_dataset = None
+        with open(config_path, "r") as f:
+            self.config = yaml.safe_load(f)
+        self.device = self.config.get("device", "cuda" if torch.cuda.is_available() else "cpu")
+        self.config_path = config_path
+        if exp_name is None:
+            exp_name = f"exp-{datetime.today().strftime('%y%m%d')}"
+        self.config["exp_name"] = exp_name
+        tmp = [self.config["in_channels"]] + [self.config["bins"]] * (self.config["in_dims"])
+        self.config["input_shape"] = tuple(tmp)
+        self.outdir = outdir
+        # initialize
+        self.pretrained_model = None
+        self.finetuned_model = None
+        self.pretrainer = None
+        self.trainer = None
+        self.optimizer = {"pretraining": None, "finetuning": None}
+        # fix seed
+        g, seed_worker = fix_seed(seed, fix_cuda=True)
+        self._seed = {"seed": seed, "g": g, "seed_worker": seed_worker}
+        # prepare model
+        self.init_pretrained_model()
+        self.init_finetuned_model()
+
+
+    def init_pretrained_model(self):
+        """
+        prepare model
+        hard coded parameters
+        
+        """
+        # prepare pretraining model
+        model_params = inspect.signature(ConvVAE.__init__).parameters
+        model_args = {k: self.config[k] for k in model_params if k in self.config}
+        self.pretrained_model = ConvVAE(**model_args)
+        for param in self.pretrained_model.parameters():
+            param.requires_grad = True
+        optimizer = RAdamScheduleFree(self.pretrained_model.parameters(), lr=float(self.config["lr"]), betas=(0.9, 0.999))
+        self.pretrainer = PreTrainer(
+            self.config, self.pretrained_model, optimizer, outdir=self.outdir
+            )
+        self.optimizer["pretraining"] = optimizer
+
+
+    def init_finetuned_model(self):
+        """
+        prepare model
+        hard coded parameters
+        
+        """
+        # prepare linear head
+        model_params = inspect.signature(LinearHead.__init__).parameters
+        model_args = {k: self.config[k] for k in model_params if k in self.config}
+        self.finetuned_model = LinearHead(self.pretrained_model, **model_args)
+        for param in self.finetuned_model.parameters():
+            param.requires_grad = True
+        optimizer = RAdamScheduleFree(self.finetuned_model.parameters(), lr=float(self.config["lr"]), betas=(0.9, 0.999))
+        loss_fn = nn.CrossEntropyLoss() # hard coded
+        self.trainer = Trainer(
+            self.config, self.finetuned_model, optimizer, loss_fn, outdir=self.outdir
+            )
+        self.optimizer["finetuning"] = optimizer
+
+
+    def prep_data(self, key_identify:str, key_data:list, key_label:str, force_no_transform:bool=False):
+        """ prepare data """
+        t = self.config["transform_2d"] if not force_no_transform else False
+        # force no transform when finetuning
+        self.train_dataset = PointHistDataset(
+            df=self.df,
+            key_identify=key_identify,
+            key_data=key_data,
+            key_label=key_label,
+            num_points=self.config["num_points"],
+            bins=self.config["bins"],
+            transform_2d=t
+        )
+        train_loader = prep_dataloader(
+            self.train_dataset, self.config["batch_size"], True, self.config["num_workers"],
+            self.config["pin_memory"], self._seed["g"], self._seed["seed_worker"]
+            )
+        if self.test_df is None:
+            return train_loader, None
+        else:
+            self.test_dataset = PointHistDataset(
+            df=self.test_df,
+            key_identify=key_identify,
+            key_data=key_data,
+            key_label=key_label,
+            num_points=self.config["num_points"],
+            bins=self.config["bins"],
+            transform_2d=False # explicitly set to False in test dataset
+            )
+            test_loader = prep_dataloader(
+                self.test_dataset, self.config["batch_size"], False, self.config["num_workers"],
+                self.config["pin_memory"], self._seed["g"], self._seed["seed_worker"]
+                )
+            return train_loader, test_loader
+
+
+    def pretrain(self, train_loader, test_loader, callbacks:list=None, verbose:bool=True):
+        """ pretraining """
+        if callbacks is not None:
+            self.pretrainer.set_callbacks(callbacks)
+        self.pretrainer.train(train_loader, test_loader)
+        if verbose:
+            print(">> Pretraining is done.")
+
+
+    def finetune(self, train_loader, test_loader, callbacks:list=None, verbose:bool=True):
+        """ finetuning """
+        if callbacks is not None:
+            self.trainer.set_callbacks(callbacks)
+        self.trainer.train(train_loader, test_loader)
+        if verbose:
+            print(">> Finetuning is done.")
+
+
+    # ToDo: check this
+    def predict(self, data_loader=None):
+        """ prediction """
+        if data_loader is None:
+            raise ValueError("!! Give data_loader !!")
+        if self.model is None:
+            raise ValueError("!! fit or load_model first !!")
+        self.finetuned_model.eval()
+        preds = []
+        probs = []
+        labels = []
+        with torch.no_grad():
+            for data, label in data_loader:
+                hist0, hist1 = (x.to(self.device) for x in data)
+                label = label.to(self.device)
+                logits, recon, mu, logvar = self.finetuned_model(hist0) # use original hist
+                preds.append(logits.argmax(dim=1).cpu().numpy())
+                probs.append(logits.cpu().numpy())
+                labels.append(label.cpu().numpy())
+        return np.concatenate(preds), np.concatenate(probs), np.concatenate(labels)
+
+
+    def get_representation(self, dataset=None, indices:list=[]):
+        """
+        get representation
+        note: pretrained model weight is changed after finetuning.
+        
+        """
+        if dataset is None:
+            dataset = self.train_dataset
+        if self.pretrained_model is None:
+            raise ValueError("!! fit or load_model first !!")
+        self.pretrained_model.eval()
+        num_data = len(dataset)
+        if len(indices) == 0:
+            indices = list(range(num_data))
+        reps = []
+        with torch.no_grad():
+            for i in indices:
+                data, _ = dataset[i]
+                hist0, hist1 = (x.to(self.device).unsqueeze(0) for x in data)  # add batch dimension
+                mu, logvar = self.pretrained_model.encode(hist0) # use original hist
+                reps.append(mu.cpu().numpy().reshape(1, -1))  # del batch dimension
+        return np.vstack(reps)
+
+
+    def check_data(self, dataset, indices:list=[], output:str="", **plot_params):
+        """
+        check data
+        
+        Parameters
+        ----------
+        dataset: torch.utils.data.Dataset
+            the PHTwins dataset
+        indices: list
+            the list of indices to be checked
+        output: str
+            the output path
+        plot_params: dict
+            the parameters for the plot
+            default_params = {
+                "nrow": 1,
+                "ncol": 3,
+                "xlabel": "x",
+                "ylabel": "y",
+                "title_list": None,
+                "cmap": "viridis",
+                "aspect": "equal",
+                "color": "royalblue",
+                "alpha": 0.7
+            }
+        
+        """
+        hist_list = [dataset[i][0][0].numpy()[0] for i in indices] # ((hist, hist), label)
+        plot_hist(hist_list, output, **plot_params)
+
+
+    def qual_eval(self, dataset, query_indices, outdir:str=""):
+        """
+        qualitative evaluation
+        
+        Parameters
+        ----------
+        dataset: torch.utils.data.Dataset
+            the PHTwins dataset
+
+        indices: list
+            the list of indices to be checked
+        
+        """
+        # get representations
+        reps = self.get_representation(dataset) # default: train dataset
+        # query data
+        query_reps = reps[query_indices]
+        # calculate cosine similarity
+        norm_query = np.linalg.norm(query_reps, axis=1, keepdims=True)
+        norm_reps = np.linalg.norm(reps, axis=1)
+        norm_query[norm_query == 0] = 1e-10
+        norm_reps[norm_reps == 0] = 1e-10
+        sim_matrix = np.dot(query_reps, reps.T) / (norm_query * norm_reps)
+        # plot query, most similar, and least similar
+        for i, idx in enumerate(query_indices):
+            output = os.path.join(outdir, f"qual_eval_{i}.tif")
+            indices = np.argsort(sim_matrix[i])[::-1]
+            plot_indices = [idx] + [indices[0]] + [indices[-1]]
+            plot_params = {
+                "title_list": ["query", "most similar", "least similar"],
+                "nrow": 1,
+                "ncol": 3,
+                }
+            self.check_data(dataset, plot_indices, output, **plot_params)
+            # nrows, ncols = 1, 3 (query / most similar / least similar)
+        return sim_matrix
+
+
+    def load_pretrained(self, model_path: str, config_path: str=None):
+        """ load pretrained model """
+        if config_path is not None:
+            with open(config_path, "r") as f:
+                self.config = yaml.safe_load(f)
+        # initialize model
+        self.init_model()
+        # load model
+        checkpoint = torch.load(model_path)
+        if "model" in checkpoint:
+            self.pretrained_model.load_state_dict(checkpoint["model"])
+        if "optimizer" in checkpoint:
+            self.optimizer["pretraining"].load_state_dict(checkpoint["optimizer"])
+
+
+    def load_finetuned(self, model_path: str, config_path: str=None):
+        """ load model with linear head """
+        if config_path is not None:
+            with open(config_path, "r") as f:
+                self.config = yaml.safe_load(f)
+        # initialize model
+        self.init_model()
+        # load model
+        checkpoint = torch.load(model_path)
+        if "model" in checkpoint:
+            self.finetuned_model.load_state_dict(checkpoint["model"])
+        if "optimizer" in checkpoint:
+            self.optimizer["finetuning"].load_state_dict(checkpoint["optimizer"])
+
+
+
+
+
+
 class HistVAE:
     """ class for training and prediction """
     def __init__(
