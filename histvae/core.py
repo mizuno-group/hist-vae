@@ -93,7 +93,13 @@ class HistVAE:
     def prep_data(self, key_identify:str, key_data:list, key_label:str):
         """ prepare data """
         self.train_dataset = PointHistDataset(
-            self.df, key_identify, key_data, key_label, self.config["num_points"], self.config["bins"]
+            df=self.df,
+            key_identify=key_identify,
+            key_data=key_data,
+            key_label=key_label,
+            num_points=self.config["num_points"],
+            bins=self.config["bins"],
+            transform_2d=self.config["transform_2d"]
         )
         train_loader = prep_dataloader(
             self.train_dataset, self.config["batch_size"], True, self.config["num_workers"],
@@ -103,7 +109,13 @@ class HistVAE:
             return train_loader, None
         else:
             self.test_dataset = PointHistDataset(
-                self.test_df, key_identify, key_data, key_label, self.config["num_points"], self.config["bins"]
+            df=self.test_df,
+            key_identify=key_identify,
+            key_data=key_data,
+            key_label=key_label,
+            num_points=self.config["num_points"],
+            bins=self.config["bins"],
+            transform_2d=False # explicitly set to False in test dataset
             )
             test_loader = prep_dataloader(
                 self.test_dataset, self.config["batch_size"], False, self.config["num_workers"],
@@ -120,7 +132,7 @@ class HistVAE:
         if verbose:
             print(">> Pretraining is done.")
 
-
+    # ToDo: check this in transform_2d is True
     def finetune(self, train_loader, test_loader, callbacks:list=None, verbose:bool=True):
         """ finetuning """
         if callbacks is not None:

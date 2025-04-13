@@ -26,6 +26,7 @@ use_pretrain_loss: False
 batch_size: 32
 epochs: 200
 lr: 0.01
+transform_2d: True
 accum_grad: 1
 clip_grad: 1.0
 save_model_every: 10

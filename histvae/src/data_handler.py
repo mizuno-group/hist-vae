@@ -99,7 +99,7 @@ def plot_hist(hist_list, output="", **plot_params):
 class PointHistDataset(Dataset):
     def __init__(
             self, df, key_identify, key_data, key_label, num_points=768, bins=16,
-            noise=None, transform=None
+            noise=None, transform_2d=True
             ):
         """
         Parameters
@@ -126,8 +126,9 @@ class PointHistDataset(Dataset):
         noise: float
             the noise to be added to the histogram
 
-        transform: callable
+        transform_2d: callable
             the transform function to be applied to the data
+            note that the transform function should take a 2D array as input
         
         """
         self.df = df
@@ -136,7 +137,10 @@ class PointHistDataset(Dataset):
         self.noise = noise
         if noise is None:
             self.noise = 1 / num_points
-        self.transform = transform
+        if transform_2d:
+            self.transform = self.rotate_scale_2d
+        else:
+            self.transform = lambda x, y: (x, y) # no transform
         # prepare meta data
         self.key_identify = key_identify
         identifier = list(df[key_identify].unique())
@@ -169,9 +173,8 @@ class PointHistDataset(Dataset):
             idxs1 = np.random.choice(pointcloud.shape[0], self.num_points, replace=True)
             pointcloud1 = pointcloud[idxs1, :]
         # transform
-        if self.transform:
-            pointcloud0 = self.transform(pointcloud0)
-            pointcloud1 = self.transform(pointcloud1)
+        pointcloud0 = self.transform(pointcloud0)
+        pointcloud1 = self.transform(pointcloud1)
         # prepare histogram
         hist0 = calc_hist(pointcloud0, bins=self.bins) / self.num_points
         hist1 = calc_hist(pointcloud1, bins=self.bins) / self.num_points
