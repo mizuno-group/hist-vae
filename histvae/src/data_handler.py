@@ -176,8 +176,8 @@ class PointHistDataset(Dataset):
         hist0 = torch.tensor(hist0, dtype=torch.float32).unsqueeze(0) # add channel dimension
         hist1 = torch.tensor(hist1, dtype=torch.float32).unsqueeze(0) # add channel dimension
         # transform
-        pointcloud0 = self.transform(pointcloud0)
-        pointcloud1 = self.transform(pointcloud1)
+        hist0 = self.transform(hist0)
+        hist1 = self.transform(hist1)
         # prepare label
         if self.label is not None:
             label = self.label[selected_indices][0]
