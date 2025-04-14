@@ -122,7 +122,7 @@ class HistVAE(Core):
             self.model = ConvVAE(**model_args)
             for param in self.model.parameters():
                 param.requires_grad = True
-            optimizer = RAdamScheduleFree(self.parameters(), lr=float(self.config["lr"]), betas=(0.9, 0.999))
+            optimizer = RAdamScheduleFree(self.model.parameters(), lr=float(self.config["lr"]), betas=(0.9, 0.999))
             self.trainer = PreTrainer(
                 self.config, self.model, optimizer, outdir=self.outdir
                 )
