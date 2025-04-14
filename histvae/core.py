@@ -143,34 +143,34 @@ class HistVAE(Core):
 
 
     # ToDo: Implement this
-    def prep_data(self, key_identify:str, key_data:list, key_label:str, force_no_transform:bool=False):
+    def prep_data(
+            self, train_data=None, test_data=None, train_group=None, test_group=None,
+            train_label=None, test_label=None
+            ):
         """ prepare data """
-        t = self.config["transform_2d"] if not force_no_transform else False
         # force no transform when finetuning
         self.train_dataset = PointHistDataset(
-            df=self.df,
-            key_identify=key_identify,
-            key_data=key_data,
-            key_label=key_label,
+            data=train_data,
+            group=train_group,
+            label=train_label,
+            mode=self.mode,
             num_points=self.config["num_points"],
             bins=self.config["bins"],
-            transform_2d=t
         )
         train_loader = prep_dataloader(
             self.train_dataset, self.config["batch_size"], True, self.config["num_workers"],
             self.config["pin_memory"], self._seed["g"], self._seed["seed_worker"]
             )
-        if self.test_df is None:
+        if self.test_data is None:
             return train_loader, None
         else:
             self.test_dataset = PointHistDataset(
-            df=self.test_df,
-            key_identify=key_identify,
-            key_data=key_data,
-            key_label=key_label,
-            num_points=self.config["num_points"],
-            bins=self.config["bins"],
-            transform_2d=False # explicitly set to False in test dataset
+                data=test_data,
+                group=test_group,
+                label=test_label,
+                mode=self.mode,
+                num_points=self.config["num_points"],
+                bins=self.config["bins"],
             )
             test_loader = prep_dataloader(
                 self.test_dataset, self.config["batch_size"], False, self.config["num_workers"],
