@@ -142,10 +142,9 @@ class HistVAE(Core):
             self.optimizer = optimizer
 
 
-    # ToDo: Implement this
     def prep_data(
-            self, train_data=None, test_data=None, train_group=None, test_group=None,
-            train_label=None, test_label=None
+            self, train_data=None, train_group=None, train_label=None,
+            test_data=None, test_group=None, test_label=None
             ):
         """ prepare data """
         # force no transform when finetuning
