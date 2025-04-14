@@ -143,9 +143,9 @@ class PointHistDataset(Dataset):
         if noise is None:
             self.noise = 1 / num_points
         if mode == "pretrain":
-            self.transform = self.rotate_scale_2d # include adding channel dimension
+            self.transform = self.rotate_scale_2d
         elif mode == "finetune":
-            self.transform = lambda x, y: (x, y) # add channel dimension
+            self.transform = lambda x, y: (x, y)
         else:
             raise ValueError(f"!! Unknown mode: {mode}. Use 'pretrain' or 'finetune'. !!")
 
@@ -199,7 +199,7 @@ class PointHistDataset(Dataset):
         return np.clip(hist, 0.0, None)
 
 
-    def rotate_scale_2d(hist0, hist1, angle_range=(-180,180), scale_range=(0.8,1.2)):
+    def rotate_scale_2d(self, hist0, hist1, angle_range=(-180,180), scale_range=(0.8,1.2)):
         """
         Parameters
         ----------
