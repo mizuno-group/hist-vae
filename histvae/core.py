@@ -181,7 +181,7 @@ class HistVAE(Core):
     def train(self, train_loader, test_loader, callbacks:list=None, verbose:bool=True):
         """ training """
         if callbacks is not None:
-            self.pretrainer.set_callbacks(callbacks)
+            self.trainer.set_callbacks(callbacks)
         self.trainer.train(train_loader, test_loader)
         if verbose:
             print(">> Training is done.")
