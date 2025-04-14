@@ -160,7 +160,7 @@ class HistVAE(Core):
             self.train_dataset, self.config["batch_size"], True, self.config["num_workers"],
             self.config["pin_memory"], self._seed["g"], self._seed["seed_worker"]
             )
-        if self.test_data is None:
+        if test_data is None:
             return train_loader, None
         else:
             self.test_dataset = PointHistDataset(
