@@ -89,7 +89,7 @@ class Core:
 class HistVAE(Core):
     """ class for training and prediction """
     def __init__(self, mode="pretrain", pretrained_model=None, **kwargs):
-        super().__init__(mode=mode, pretrained_model=pretrained_model, **kwargs)
+        super().__init__(**kwargs)
         # arguments
         self.mode = mode
         assert self.mode in ["pretrain", "finetune"], "!! mode must be pretrain or finetune !!"
@@ -99,7 +99,7 @@ class HistVAE(Core):
         tmp = [self.config["in_channels"]] + [self.config["bins"]] * (self.config["in_dims"])
         self.config["input_shape"] = tuple(tmp)
         # initialize model
-        self.init_model(self.mode, self.pretrained_model)
+        self.init_model(self.mode)
 
 
     def init_model(self, mode="pretrain"):
