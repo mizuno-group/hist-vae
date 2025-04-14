@@ -350,10 +350,10 @@ class Preprocess:
 
         """
         # prepare meta data
-        identifier = list(df[self.key_identify].unique())
-        self.idx2id = {k: v for k, v in enumerate(identifier)} # index to identifier
-        self.num_data = len(identifier) # number of data
-        self.id2label = dict(zip(df[self.key_identify], df[self.key_label]))
+        group = list(df[self.key_group].unique())
+        self.idx2id = {k: v for k, v in enumerate(group)} # index to identifier
+        self.num_data = len(group) # number of data
+        self.id2label = dict(zip(df[self.key_group], df[self.key_label]))
         # data
         data = df[self.key_data].values
         data = data.astype(np.float32)
@@ -366,7 +366,7 @@ class Preprocess:
         else:
             label = None
         # group
-        group = df[self.key_identify].values
+        group = df[self.key_group].values
         if group.ndim == 1:
             group = group.reshape(-1, 1)
         group = group.astype(np.int32)
@@ -377,13 +377,13 @@ class Preprocess:
         """
         get meta data that contains:
             - index
-            - identifier
+            - group
             - label
         
         """
         meta = pd.DataFrame({
             "index": list(range(self.num_data)),
-            "identifier": list(self.idx2id.values()),
+            "group": list(self.idx2id.values()),
             "label": [self.id2label[k] for k in self.idx2id.values()]
             })
         return meta
