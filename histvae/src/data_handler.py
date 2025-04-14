@@ -139,6 +139,7 @@ class PointHistDataset(Dataset):
         self.bins = bins
         self.num_points = num_points
         self.noise = noise
+        self.num_data = len(np.unique(group))
         if noise is None:
             self.noise = 1 / num_points
         if mode == "pretrain":
