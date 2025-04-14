@@ -145,7 +145,7 @@ class PointHistDataset(Dataset):
         if mode == "pretrain":
             self.transform = self.rotate_scale_2d # include adding channel dimension
         elif mode == "finetune":
-            self.transform = lambda x, y: (x.unsqueeze(0), y.unsqueeze(0)) # add channel dimension
+            self.transform = lambda x, y: (x, y) # add channel dimension
         else:
             raise ValueError(f"!! Unknown mode: {mode}. Use 'pretrain' or 'finetune'. !!")
 
@@ -204,7 +204,7 @@ class PointHistDataset(Dataset):
         Parameters
         ----------
         hist0, hist1: torch.Tensor
-            2D histogram to be rotated and scaled
+            2D histogram to be rotated and scaled with shape (1, H, W)
 
         angle_range: tuple
             range of rotation angle (degree)
@@ -216,9 +216,6 @@ class PointHistDataset(Dataset):
         # sample random angle and scale
         angle = random.uniform(*angle_range)
         scale = random.uniform(*scale_range)
-        # convert to (C, H, W) format for PyTorch
-        hist0 = hist0.unsqueeze(0)  # (1, H, W)
-        hist1 = hist1.unsqueeze(0)  # (1, H, W)
         # rotate and scale
         rotated_scaled0 = TF.affine(hist0, angle=angle, translate=(0,0), scale=scale, shear=0)
         rotated_scaled1 = TF.affine(hist1, angle=angle, translate=(0,0), scale=scale, shear=0)
