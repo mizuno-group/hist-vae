@@ -143,9 +143,9 @@ class PointHistDataset(Dataset):
         if noise is None:
             self.noise = 1 / num_points
         if mode == "pretrain":
-            self.transform = self.rotate_scale_2d
+            self.transform = self.rotate_scale_2d # include adding channel dimension
         elif mode == "finetune":
-            self.transform = lambda x, y: (x, y) # no transform
+            self.transform = lambda x, y: (x.unsqueeze(0), y.unsqueeze(0)) # add channel dimension
         else:
             raise ValueError(f"!! Unknown mode: {mode}. Use 'pretrain' or 'finetune'. !!")
 
@@ -169,15 +169,15 @@ class PointHistDataset(Dataset):
             pointcloud0 = pointcloud[idxs0, :]
             idxs1 = np.random.choice(pointcloud.shape[0], self.num_points, replace=True)
             pointcloud1 = pointcloud[idxs1, :]
-        # transform
-        pointcloud0 = self.transform(pointcloud0)
-        pointcloud1 = self.transform(pointcloud1)
         # prepare histogram
         hist0 = calc_hist(pointcloud0, bins=self.bins) / self.num_points
         hist1 = calc_hist(pointcloud1, bins=self.bins) / self.num_points
         hist1 = self.add_noise(hist1, self.noise) # add noise to the histogram
         hist0 = torch.tensor(hist0, dtype=torch.float32).unsqueeze(0) # add channel dimension
         hist1 = torch.tensor(hist1, dtype=torch.float32).unsqueeze(0) # add channel dimension
+        # transform
+        pointcloud0 = self.transform(pointcloud0)
+        pointcloud1 = self.transform(pointcloud1)
         # prepare label
         if self.label is not None:
             label = self.label[selected_indices][0]
@@ -222,7 +222,7 @@ class PointHistDataset(Dataset):
         # rotate and scale
         rotated_scaled0 = TF.affine(hist0, angle=angle, translate=(0,0), scale=scale, shear=0)
         rotated_scaled1 = TF.affine(hist1, angle=angle, translate=(0,0), scale=scale, shear=0)
-        return rotated_scaled0.squeeze(0), rotated_scaled1.squeeze(0)
+        return rotated_scaled0, rotated_scaled1
 
 
 def prep_dataloader(
