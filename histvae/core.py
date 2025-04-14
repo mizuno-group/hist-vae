@@ -308,28 +308,28 @@ class HistVAE(Core):
 
 class Preprocess:
     def __init__(
-            self, key_identify, key_data, key_label=None
+            self, key_data, key_group, key_label=None
             ):
         """
         Parameters
         ----------
-        key_identify: str
-            the key to identify the data
-
         key_data: list
             the keys for the data
+
+        key_group: str
+            the key to identify the data
 
         key_label: int
             the key for the label
             note that the label should be integer
         
         """
-        self.key_identify = key_identify
         self.key_data = key_data
+        self.key_group = key_group
         self.key_label = key_label
 
 
-    def preprocess(self, df):
+    def fit_transform(self, df):
         """
         preprocess the data
 
@@ -342,12 +342,12 @@ class Preprocess:
         -------
         data: np.ndarray
             preprocessed data
-
-        label: np.ndarray
-            preprocessed label
         
         group: np.ndarray
             preprocessed group
+
+        label: np.ndarray
+            preprocessed label
 
         """
         # prepare meta data
@@ -371,7 +371,7 @@ class Preprocess:
         if group.ndim == 1:
             group = group.reshape(-1, 1)
         group = group.astype(np.int32)
-        return data, label, group
+        return data, group, label
 
 
     def get_meta(self) -> pd.DataFrame:
