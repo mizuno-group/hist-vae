@@ -15,7 +15,8 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 import torchvision.transforms.functional as TF
 
-def calc_hist(X, bins=16) -> np.ndarray:
+# functions
+def calc_hist(X, bins=16):
     try:
         s = X.shape[1]
     except IndexError:
@@ -95,18 +96,13 @@ def plot_hist(hist_list, output="", **plot_params):
     plt.close()
 
 
-# ToDo: transformの部分をrotate_scale_2dに変更する
-class PointHistDataset(Dataset):
+class Preprocess:
     def __init__(
-            self, df, key_identify, key_data, key_label, num_points=768, bins=16,
-            noise=None, transform_2d=True
+            self, key_identify, key_data, key_label=None
             ):
         """
         Parameters
         ----------
-        df: pd.DataFrame
-            DataFrame containing the data and label
-
         key_identify: str
             the key to identify the data
 
@@ -116,6 +112,94 @@ class PointHistDataset(Dataset):
         key_label: int
             the key for the label
             note that the label should be integer
+        
+        """
+        self.key_identify = key_identify
+        self.key_data = key_data
+        self.key_label = key_label
+
+
+    def preprocess(self, df):
+        """
+        preprocess the data
+
+        Parameters
+        ----------
+        df: pd.DataFrame
+            the data to be preprocessed
+
+        Returns
+        -------
+        data: np.ndarray
+            preprocessed data
+
+        label: np.ndarray
+            preprocessed label
+        
+        group: np.ndarray
+            preprocessed group
+
+        """
+        # prepare meta data
+        identifier = list(df[self.key_identify].unique())
+        self.idx2id = {k: v for k, v in enumerate(identifier)} # index to identifier
+        self.num_data = len(identifier) # number of data
+        self.id2label = dict(zip(df[self.key_identify], df[self.key_label]))
+        # data
+        data = df[self.key_data].values
+        data = data.astype(np.float32)
+        # label
+        if self.key_label is not None:
+            label = df[self.key_label].values
+            if label.ndim == 1:
+                label = label.reshape(-1, 1)
+            label = label.astype(np.int32)
+        else:
+            label = None
+        # group
+        group = df[self.key_identify].values
+        if group.ndim == 1:
+            group = group.reshape(-1, 1)
+        group = group.astype(np.int32)
+        return data, label, group
+
+
+    def get_meta(self) -> pd.DataFrame:
+        """
+        get meta data that contains:
+            - index
+            - identifier
+            - label
+        
+        """
+        meta = pd.DataFrame({
+            "index": list(range(self.num_data)),
+            "identifier": list(self.idx2id.values()),
+            "label": [self.id2label[k] for k in self.idx2id.values()]
+            })
+        return meta
+
+
+class PointHistDataset(Dataset):
+    def __init__(
+            self, data, group, label=None, mode="pretrain",
+            num_points=768, bins=64, noise=None
+            ):
+        """
+        Parameters
+        ----------
+        data: np.ndarray
+            the data to be used for training
+
+        group: np.ndarray
+            the group to which the data belongs
+        
+        label: np.ndarray
+            the label of the data
+        
+        mode: str
+            the mode of the dataset
+            "pretrain" or "finetune"
 
         bins: int
             the number of bins for the histogram
@@ -131,36 +215,33 @@ class PointHistDataset(Dataset):
             note that the transform function should take a 2D array as input
         
         """
-        self.df = df
+        super().__init__()
+        assert data.shape[0] == group.shape[0] == label.shape[0], "!! data, group, and label must have the same number of samples !!"
+        self.data = data
+        self.group = group
+        self.label = label
+        self.mode = mode
         self.bins = bins
         self.num_points = num_points
         self.noise = noise
         if noise is None:
             self.noise = 1 / num_points
-        if transform_2d:
+        if mode == "pretrain":
             self.transform = self.rotate_scale_2d
-        else:
+        elif mode == "finetune":
             self.transform = lambda x, y: (x, y) # no transform
-        # prepare meta data
-        self.key_identify = key_identify
-        identifier = list(df[key_identify].unique())
-        self.idx2id = {k: v for k, v in enumerate(identifier)} # index to identifier
-        self.num_data = len(identifier) # number of data
-        # prepare data
-        self.key_data = key_data
-        # prepare label
-        self.key_label = key_label
-        self.id2label = dict(zip(df[key_identify], df[key_label]))
+        else:
+            raise ValueError(f"!! Unknown mode: {mode}. Use 'pretrain' or 'finetune'. !!")
 
-    def __len__(self) -> int:
+
+    def __len__(self):
         return self.num_data
 
-    def __getitem__(self, idx) -> tuple:
-        # get data
-        key = self.idx2id[idx]
-        data = self.df[self.df[self.key_identify] == key]
-        # get point cloud
-        pointcloud = np.array(data[self.key_data], dtype=np.float32)
+
+    def __getitem__(self, idx):
+        # get the indicated data
+        selected_indices = self.group[self.group == idx]
+        pointcloud = self.data[selected_indices]
         # limit the number of points if necessary (random sampling)
         if pointcloud.shape[0] > self.num_points:
             idxs0 = np.random.choice(pointcloud.shape[0], self.num_points, replace=False)
@@ -182,29 +263,15 @@ class PointHistDataset(Dataset):
         hist0 = torch.tensor(hist0, dtype=torch.float32).unsqueeze(0) # add channel dimension
         hist1 = torch.tensor(hist1, dtype=torch.float32).unsqueeze(0) # add channel dimension
         # prepare label
-        label = self.id2label[key]
-        try:
-            label = torch.tensor(label, dtype=torch.long)
-        except ValueError:
-            pass # if label is None
+        if self.label is not None:
+            label = self.label[selected_indices][0]
+            label = torch.tensor(label, dtype=torch.int64)
+        else:
+            label = None
+        # return the data
         return (hist0, hist1), label
         # hist0, original; hist1, noisy
     
-    def get_meta(self) -> pd.DataFrame:
-        """
-        get meta data that contains:
-            - index
-            - identifier
-            - label
-        
-        """
-        meta = pd.DataFrame({
-            "index": list(range(self.num_data)),
-            "identifier": list(self.idx2id.values()),
-            "label": [self.id2label[k] for k in self.idx2id.values()]
-            })
-        return meta
-
 
     def add_noise(self, hist, noise=0.001):
         """
@@ -240,11 +307,6 @@ class PointHistDataset(Dataset):
         rotated_scaled0 = TF.affine(hist0, angle=angle, translate=(0,0), scale=scale, shear=0)
         rotated_scaled1 = TF.affine(hist1, angle=angle, translate=(0,0), scale=scale, shear=0)
         return rotated_scaled0.squeeze(0), rotated_scaled1.squeeze(0)
-    
-
-    def _off_transform(self):
-        """ switch off the transform function """
-        self.transform = lambda x, y: (x, y)
 
 
 def prep_dataloader(
@@ -284,18 +346,3 @@ def prep_dataloader(
         worker_init_fn=seed_worker,
         )    
     return loader
-
-
-# ToDo: implement a factory class for dataset
-class DatasetFactory:
-    @staticmethod
-    def get_dataset(mode:str, **kwargs) -> PointHistDataset:
-        """
-        Get the dataset class based on the mode.
-        """
-        if mode == "pretrain":
-            return PointHistDataset(**kwargs)
-        elif mode == "finetune":
-            return PointHistDataset(**kwargs)
-        else:
-            raise ValueError(f"!! Unknown mode: {mode}. Use 'pretrain' or 'finetune'. !!")

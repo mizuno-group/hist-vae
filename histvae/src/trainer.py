@@ -380,7 +380,7 @@ class FineTuner(BaseTrainer):
             label = label.to(self.device)
             # forward/loss calculation
             if self.use_pretrain_loss:
-                logits, recon, mu, logvar = model(hist1) # use noisy hist for pretraining
+                logits, recon, mu, logvar = self.model(hist1) # use noisy hist for pretraining
                 pt_loss, _, _ = self.model.vae_loss(
                     recon, hist0, mu, logvar, beta=self.config["beta"]
                     )
@@ -388,7 +388,7 @@ class FineTuner(BaseTrainer):
                 ft_loss = self.loss_fn(logits, label)
                 loss = pt_loss + ft_loss
             else:
-                logits, recon, mu, logvar = model(hist0) # use original hist
+                logits, recon, mu, logvar = self.model(hist0) # use original hist
                 ft_loss = self.loss_fn(logits, label)
                 pt_loss = 0
                 loss = ft_loss
@@ -407,7 +407,7 @@ class FineTuner(BaseTrainer):
             total_samples += batch_size
             # Accuracy calculation (disable gradients for efficiency)
             with torch.no_grad():
-                predictions = torch.argmax(output, dim=1)
+                predictions = torch.argmax(logits, dim=1)
                 correct += (predictions == label).sum().item()
         return total_loss / total_samples, total_pt_loss / total_samples, total_ft_loss / total_samples, correct / total_samples
             
@@ -428,7 +428,7 @@ class FineTuner(BaseTrainer):
                 label = label.to(self.device)
                 # forward/loss calculation
                 if self.use_pretrain_loss:
-                    logits, recon, mu, logvar = model(hist1) # use noisy hist for pretraining
+                    logits, recon, mu, logvar = self.model(hist1) # use noisy hist for pretraining
                     pt_loss, _, _ = self.model.vae_loss(
                         recon, hist0, mu, logvar, beta=self.config["beta"]
                         )
@@ -436,7 +436,7 @@ class FineTuner(BaseTrainer):
                     ft_loss = self.loss_fn(logits, label)
                     loss = pt_loss + ft_loss
                 else:
-                    logits, recon, mu, logvar = model(hist0) # use original hist
+                    logits, recon, mu, logvar = self.model(hist0) # use original hist
                     ft_loss = self.loss_fn(logits, label)
                     pt_loss = 0
                     loss = ft_loss
@@ -445,6 +445,6 @@ class FineTuner(BaseTrainer):
                 total_loss += loss.item() * batch_size # detach() is not necessary
                 total_samples += batch_size
                 # Accuracy calculation
-                predictions = torch.argmax(output, dim=1)
+                predictions = torch.argmax(logits, dim=1)
                 correct += int((predictions == label).sum())
         return total_loss / total_samples, total_pt_loss / total_samples, total_ft_loss / total_samples, correct / total_samples

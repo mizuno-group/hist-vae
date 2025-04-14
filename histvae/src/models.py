@@ -277,3 +277,8 @@ class LinearHead(nn.Module):
         kl_loss = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp()) / batch_size
         total_loss = recon_loss + beta * kl_loss
         return total_loss, recon_loss, kl_loss
+    
+
+    def encode(self, x):
+        mu, logvar = self.pretrained.encode(x)
+        return mu, logvar
