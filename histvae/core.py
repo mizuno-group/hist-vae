@@ -89,7 +89,7 @@ class Core:
 class HistVAE(Core):
     """ class for training and prediction """
     def __init__(self, mode="pretrain", pretrained_model=None, **kwargs):
-        super().__init__(**kwargs)
+        super().__init__(mode=mode, pretrained_model=pretrained_model, **kwargs)
         # arguments
         self.mode = mode
         assert self.mode in ["pretrain", "finetune"], "!! mode must be pretrain or finetune !!"
