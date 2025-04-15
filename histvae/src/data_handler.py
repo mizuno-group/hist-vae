@@ -131,6 +131,7 @@ class PointHistDataset(Dataset):
         
         """
         super().__init__()
+        # check the input
         assert data.shape[0] == group.shape[0] == label.shape[0], "!! data, group, and label must have the same number of samples !!"
         self.data = data
         self.group = group
@@ -138,10 +139,12 @@ class PointHistDataset(Dataset):
         self.mode = mode
         self.bins = bins
         self.num_points = num_points
-        self.noise = noise
-        self.num_data = len(np.unique(group))
-        if noise is None:
-            self.noise = 1 / num_points
+        self.noise = noise or (1 / num_points)
+        # filter the data
+        unique_groups, counts = np.unique(group, return_counts=True)
+        self.valid_groups = unique_groups[counts > 0]
+        # only keep groups with at least one sample
+        self.num_data = len(self.valid_groups)
         if mode == "pretrain":
             self.transform = self.rotate_scale_2d
         elif mode == "finetune":
@@ -156,6 +159,7 @@ class PointHistDataset(Dataset):
 
     def __getitem__(self, idx):
         # get the indicated data
+        group_idx = self.valid_groups[idx]
         selected_indices = self.group[self.group == idx]
         pointcloud = self.data[selected_indices]
         # limit the number of points if necessary (random sampling)
