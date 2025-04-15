@@ -391,7 +391,7 @@ class Preprocess:
         meta = pd.DataFrame({
             "group_indices": list(self.idx2id.keys()),
             "group_values": list(self.idx2id.values()),
-            "label_indices": list(self.idx2label.keys()),
-            "label_indices": list(self.idx2id.values()),
+            "label_indices": list(self.idx2label.keys()) if self.idx2label is not None else None,
+            "label_indices": list(self.idx2label.values()) if self.idx2label is not None else None,
             })
         return meta
