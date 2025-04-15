@@ -95,6 +95,7 @@ def plot_hist(hist_list, output="", **plot_params):
     plt.show()
     plt.close()
 
+
 class PointHistDataset(Dataset):
     def __init__(
             self, data, group, label=None, mode="pretrain",
@@ -160,7 +161,7 @@ class PointHistDataset(Dataset):
     def __getitem__(self, idx):
         # get the indicated data
         group_idx = self.valid_groups[idx]
-        selected_indices = self.group[self.group == idx]
+        selected_indices = np.where(self.group == group_idx)[0]
         pointcloud = self.data[selected_indices]
         # limit the number of points if necessary (random sampling)
         if pointcloud.shape[0] > self.num_points:
