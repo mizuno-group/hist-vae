@@ -388,6 +388,7 @@ class Preprocess:
             - label values
         
         """
+        assert self.idx2id is not None, "!! fit_transform first !!"
         meta = pd.DataFrame({
             "group_indices": list(self.idx2id.keys()),
             "group_values": list(self.idx2id.values()),
