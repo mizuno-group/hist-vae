@@ -349,28 +349,29 @@ class Preprocess:
             preprocessed label
 
         """
-        # prepare meta data
-        group = list(df[self.key_group].unique())
-        self.idx2id = {k: int(v) for k, v in enumerate(group)} # index to identifier
-        self.num_data = len(group) # number of data
-        self.id2label = dict(zip(df[self.key_group], df[self.key_label]))
+        # prepare meta data and converter
+        # group, assumed to be 1D
+        group = df[self.key_group].values.flatten()
+        unique_group = np.unique(group)
+        self.idx2id = {k: v for k, v in enumerate(unique_group)} # index to identifier
+        self.id2idx = {v: k for k, v in self.idx2id.items()} # identifier to index
+        self.num_data = len(unique_group) # number of data
+        converted_group = np.array([self.id2idx[k] for k in group])
+        # label, assumed to be 1D
+        if self.key_label is not None:
+            label = df[self.key_label].values.flatten()
+            unique_label = np.unique(label)
+            self.idx2label = {k: v for k, v in enumerate(unique_label)} # index to label
+            self.label2idx = {v: k for k, v in self.idx2label.items()} # label to index
+            converted_label = np.array([self.label2idx[k] for k in label])
+        else:
+            self.idx2label = None
+            self.label2idx = None
+            converted_label = None
         # data
         data = df[self.key_data].values
         data = data.astype(np.float32)
-        # label
-        if self.key_label is not None:
-            label = df[self.key_label].values
-            if label.ndim == 1:
-                label = label.reshape(-1, 1)
-            label = label.astype(np.int32)
-        else:
-            label = None
-        # group
-        group = df[self.key_group].values
-        if group.ndim == 1:
-            group = group.reshape(-1, 1)
-        group = group.astype(np.int32)
-        return data, group, label
+        return data, converted_group, converted_label
 
 
     def get_meta(self) -> pd.DataFrame:
