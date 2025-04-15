@@ -96,6 +96,7 @@ class HistVAE(Core):
         if mode == "finetune" and pretrained_model is None:
             raise ValueError("!! pretrained_model must be given in finetune mode !!")
         self.pretrained_model = pretrained_model
+        # set input_shape, hard coded
         tmp = [self.config["in_channels"]] + [self.config["bins"]] * (self.config["in_dims"])
         self.config["input_shape"] = tuple(tmp)
         # initialize model
@@ -304,6 +305,25 @@ class HistVAE(Core):
             self.check_data(dataset, plot_indices, output, **plot_params)
             # nrows, ncols = 1, 3 (query / most similar / least similar)
         return sim_matrix
+
+
+    def load_model(self, model_path: str, config_path: str=None):
+        """ load model """
+        if config_path is not None:
+            with open(config_path, "r") as f:
+                self.config = yaml.safe_load(f)
+        # set input_shape, hard coded
+        tmp = [self.config["in_channels"]] + [self.config["bins"]] * (self.config["in_dims"])
+        self.config["input_shape"] = tuple(tmp)
+        # initialize model
+        self.init_model()
+        # load model
+        checkpoint = torch.load(model_path)
+        if "model" in checkpoint:
+            self.model.load_state_dict(checkpoint["model"])
+        if "optimizer" in checkpoint:
+            self.optimizer.load_state_dict(checkpoint["optimizer"])
+
 
 class Preprocess:
     def __init__(
