@@ -351,7 +351,7 @@ class Preprocess:
         """
         # prepare meta data
         group = list(df[self.key_group].unique())
-        self.idx2id = {k: v for k, v in enumerate(group)} # index to identifier
+        self.idx2id = {k: int(v) for k, v in enumerate(group)} # index to identifier
         self.num_data = len(group) # number of data
         self.id2label = dict(zip(df[self.key_group], df[self.key_label]))
         # data
