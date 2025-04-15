@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 import random
 import matplotlib.pyplot as plt
+import inspect
 
 import torch
 from torch.utils.data import Dataset, DataLoader
@@ -98,7 +99,7 @@ def plot_hist(hist_list, output="", **plot_params):
 
 class PointHistDataset(Dataset):
     def __init__(
-            self, data, group, label=None, mode="pretrain",
+            self, data, group, label=None, transform=False,
             num_points=768, bins=64, noise=None
             ):
         """
@@ -113,9 +114,8 @@ class PointHistDataset(Dataset):
         label: np.ndarray
             the label of the data
         
-        mode: str
-            the mode of the dataset
-            "pretrain" or "finetune"
+        transform: bool
+            whether to apply transform to the data
 
         bins: int
             the number of bins for the histogram
@@ -125,10 +125,6 @@ class PointHistDataset(Dataset):
 
         noise: float
             the noise to be added to the histogram
-
-        transform_2d: callable
-            the transform function to be applied to the data
-            note that the transform function should take a 2D array as input
         
         """
         super().__init__()
@@ -137,7 +133,6 @@ class PointHistDataset(Dataset):
         self.data = data
         self.group = group
         self.label = label
-        self.mode = mode
         self.bins = bins
         self.num_points = num_points
         self.noise = noise or (1 / num_points)
@@ -146,12 +141,10 @@ class PointHistDataset(Dataset):
         self.valid_groups = unique_groups[counts > 0]
         # only keep groups with at least one sample
         self.num_data = len(self.valid_groups)
-        if mode == "pretrain":
+        if transform:
             self.transform = self.rotate_scale_2d
-        elif mode == "finetune":
-            self.transform = lambda x, y: (x, y)
         else:
-            raise ValueError(f"!! Unknown mode: {mode}. Use 'pretrain' or 'finetune'. !!")
+            self.transform = lambda x, y: (x, y)
 
 
     def __len__(self):
@@ -225,41 +218,46 @@ class PointHistDataset(Dataset):
         rotated_scaled1 = TF.affine(hist1, angle=angle, translate=(0,0), scale=scale, shear=0)
         return rotated_scaled0, rotated_scaled1
 
+class DataHandler:
+    def __init__(self, config:dict):
+        assert isinstance(config, dict), "!! config must be a dictionary !!"
+        self.config = config
 
-def prep_dataloader(
-    dataset, batch_size, shuffle=None, num_workers=2, pin_memory=True,
-    g=None, seed_worker=None
-    ) -> DataLoader:
-    """
-    prepare train and test loader
-    
-    Parameters
-    ----------
-    dataset: torch.utils.data.Dataset
-        prepared Dataset instance
-    
-    batch_size: int
-        the batch size
-    
-    shuffle: bool
-        whether data is shuffled or not
 
-    num_workers: int
-        the number of threads or cores for computing
-        should be greater than 2 for fast computing
-    
-    pin_memory: bool
-        determines use of memory pinning
-        should be True for fast computing
-    
-    """
-    loader = torch.utils.data.DataLoader(
-        dataset,
-        batch_size=batch_size,
-        shuffle=shuffle,
-        num_workers=num_workers,
-        pin_memory=pin_memory,
-        generator=g,
-        worker_init_fn=seed_worker,
-        )    
-    return loader
+    def make_dataset(self, data, group, label=None, transform=False):
+        """
+        make dataset for training and testing
+
+        """
+        # check the input
+        assert data.shape[0] == group.shape[0], "!! data, group, and label must have the same number of samples !!"
+        if label is not None:
+            assert data.shape[0] == label.shape[0], "!! data, group, and label must have the same number of samples !!"
+        # create dataset
+        ds_params = inspect.signature(PointHistDataset.__init__).parameters # diff
+        ds_args = {k: self.config[k] for k in ds_params if k in self.config}
+        dataset = PointHistDataset(
+            data=data,
+            group=group,
+            label=label,
+            transform=transform,
+            **ds_args
+            )
+        return dataset
+
+
+    def make_dataloader(self, dataset):
+        """
+        prepare train and test loader
+        
+        Parameters
+        ----------
+        dataset: torch.utils.data.Dataset
+            prepared Dataset instance
+                
+        """
+        # create dataloader
+        dl_params = inspect.signature(DataLoader.__init__).parameters # diff
+        dl_args = {k: self.config[k] for k in dl_params if k in self.config}
+        loader = DataLoader(dataset, **dl_args)
+        return loader

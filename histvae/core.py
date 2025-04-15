@@ -17,93 +17,65 @@ import os, yaml
 import inspect
 from datetime import datetime
 
-from .src.models import ConvVAE, LinearHead
+from .src.models import ModelHandler
 from .src.trainer import PreTrainer, FineTuner
-from .src.data_handler import PointHistDataset, prep_dataloader, plot_hist
+from .src.data_handler import DataHandler, plot_hist
 from .src.utils import fix_seed
 
-# Base class
-class Core:
+class HistVAE:
     def __init__(
-            self, config_path: str=None, train_data=None, test_data=None,
-            outdir: str=None, exp_name: str=None, seed: int=42
+            self, config: dict=None, outdir: str=None, exp_name: str=None, seed: int=42
             ):
         # arguments
-        self.config_path = config_path
-        self.data = train_data
-        self.test_data = test_data
+        assert config is not None, "!! config must be given !!"
+        self.config = config
         self.outdir = outdir
         self.exp_name = exp_name
         self.seed = seed
+        # delegate
+        self.data_handler = DataHandler(config)
+        self.model_handler = ModelHandler(config)
         # initialize
-        self.model = None
         self.train_dataset = None
         self.test_dataset = None
+        self.train_loader = None
+        self.test_loader = None
+        self.model = None
         self.trainer = None
         self.optimizer = None
-        # loading
-        with open(config_path, "r") as f:
-            self.config = yaml.safe_load(f)
-        self.device = self.config.get("device", "cuda" if torch.cuda.is_available() else "cpu")
-        self.config_path = config_path
-        if exp_name is None:
-            exp_name = f"exp-{datetime.today().strftime('%y%m%d')}"
-        self.config["exp_name"] = exp_name
+        self.loss_fn = None
         # fix seed
         g, seed_worker = fix_seed(seed, fix_cuda=True)
         self._seed = {"seed": seed, "g": g, "seed_worker": seed_worker}
-
-    def init_model(self):
-        raise NotImplementedError
-    
-    def get_model(self):
-        return self.model
-
-    def train(self):
-        raise NotImplementedError
-
-    def predict(self):
-        raise NotImplementedError
-    
-    def get_latent(self):
-        raise NotImplementedError
-
-    def check_data(self):
-        raise NotImplementedError
-    
-    def load_model(self, model_path: str, config_path: str=None):
-        """ load model """
-        if config_path is not None:
-            with open(config_path, "r") as f:
-                self.config = yaml.safe_load(f)
-        # initialize model
-        self.init_model()
-        # load model
-        checkpoint = torch.load(model_path)
-        if "model" in checkpoint:
-            self.model.load_state_dict(checkpoint["model"])
-        if "optimizer" in checkpoint:
-            self.optimizer.load_state_dict(checkpoint["optimizer"])
-
-
-class HistVAE(Core):
-    """ class for training and prediction """
-    def __init__(self, mode="pretrain", pretrained_model=None, **kwargs):
-        super().__init__(**kwargs)
-        # arguments
-        self.mode = mode
-        assert self.mode in ["pretrain", "finetune"], "!! mode must be pretrain or finetune !!"
-        if mode == "finetune" and pretrained_model is None:
-            raise ValueError("!! pretrained_model must be given in finetune mode !!")
-        self.pretrained_model = pretrained_model
-        # set input_shape, hard coded
+        # loading
+        self.device = self.config.get("device", "cuda" if torch.cuda.is_available() else "cpu")
+        if exp_name is None:
+            exp_name = f"exp-{datetime.today().strftime('%y%m%d')}"
+        self.config["exp_name"] = exp_name
         tmp = [self.config["in_channels"]] + [self.config["bins"]] * (self.config["in_dims"])
-        self.config["input_shape"] = tuple(tmp)
-        # initialize model
-        self.init_model(self.mode)
+        self.config["input_shape"] = tuple(tmp) # hard coded for ConvVAE
 
 
-    def init_model(self, mode="pretrain"):
+    def prep_data(
+            self, train_data=None, train_group=None, train_label=None, train_transform=True,
+            test_data=None, test_group=None, test_label=None, test_transform=False
+            ):
+        """ prepare data """
+        # dataset
+        self.train_dataset = self.data_handler.make_dataset(
+            data=train_data, group=train_group, label=train_label, transform=train_transform
+            )
+        if test_data is not None:
+            self.test_dataset = self.data_handler.make_dataset(
+                data=test_data, group=test_group, label=test_label, transform=test_transform
+                )
+        # dataloader
+        self.train_loader = self.data_handler.make_dataloader(dataset=self.train_dataset)
+        if self.test_dataset is not None:
+            self.test_loader = self.data_handler.make_dataloader(dataset=self.test_dataset)
+
+
+    def prep_model(self, mode="pretrain", model_path:str=None):
         """
         prepare model
         hard coded parameters
@@ -111,79 +83,46 @@ class HistVAE(Core):
         Parameters
         ----------
         mode: str
-            "pretrain" or "finetune"
-            note that the model is initialized as ConvVAE in pretraining
-            and as LinearHead in finetuning
+            "pretrain", "cpt", or "finetune"
+
+        model_path: str
+            path to the pretrained model
+            only used in "cpt" and "finetune"
         
         """
+        # check the mode
+        assert mode in ["pretrain", "cpt", "finetune"], "!! mode must be pretrain, cpt, or finetune !!"
         if mode == "pretrain":
             # prepare pretraining model
-            model_params = inspect.signature(ConvVAE.__init__).parameters # diff
-            model_args = {k: self.config[k] for k in model_params if k in self.config}
-            self.model = ConvVAE(**model_args)
-            for param in self.model.parameters():
-                param.requires_grad = True
-            optimizer = RAdamScheduleFree(self.model.parameters(), lr=float(self.config["lr"]), betas=(0.9, 0.999))
+            self.model = self.model_handler.make_pretrain()
+            self.optimizer = RAdamScheduleFree(self.model.parameters(), lr=float(self.config["lr"]), betas=(0.9, 0.999))
             self.trainer = PreTrainer(
-                self.config, self.model, optimizer, outdir=self.outdir
+                self.config, self.model, self.optimizer, outdir=self.outdir
                 )
-            self.optimizer = optimizer
+        elif mode == "cpt":
+            # prepare continuous pretraining model
+            assert model_path is not None, "!! model_path must be given in cpt mode!!"
+            self.model = self.model_handler.make_cpt(model_path=model_path)
+            self.optimizer = RAdamScheduleFree(self.model.parameters(), lr=float(self.config["lr"]), betas=(0.9, 0.999))
+            self.trainer = PreTrainer(
+                self.config, self.model, self.optimizer, outdir=self.outdir
+                )
         elif mode == "finetune":
-            # prepare linear head
-            model_params = inspect.signature(LinearHead.__init__).parameters # diff
-            model_args = {k: self.config[k] for k in model_params if k in self.config}
-            self.model = LinearHead(self.pretrained_model, **model_args)
-            for param in self.model.parameters():
-                param.requires_grad = True
-            optimizer = RAdamScheduleFree(self.model.parameters(), lr=float(self.config["lr"]), betas=(0.9, 0.999))
-            loss_fn = nn.CrossEntropyLoss() # hard coded
+            # prepare finetuning model
+            assert model_path is not None, "!! model_path must be given in finetune mode!!"
+            self.model = self.model_handler.make_finetune(model_path=model_path)
+            self.optimizer = optim.Adam(self.model.parameters(), lr=float(self.config["lr"]), betas=(0.9, 0.999))
+            self.loss_fn = nn.CrossEntropyLoss()
             self.trainer = FineTuner(
-                self.config, self.model, optimizer, loss_fn, outdir=self.outdir
+                self.config, self.model, self.optimizer, self.loss_fn, outdir=self.outdir
                 )
-            self.optimizer = optimizer
 
 
-    def prep_data(
-            self, train_data=None, train_group=None, train_label=None,
-            test_data=None, test_group=None, test_label=None
-            ):
-        """ prepare data """
-        # force no transform when finetuning
-        self.train_dataset = PointHistDataset(
-            data=train_data,
-            group=train_group,
-            label=train_label,
-            mode=self.mode,
-            num_points=self.config["num_points"],
-            bins=self.config["bins"],
-        )
-        train_loader = prep_dataloader(
-            self.train_dataset, self.config["batch_size"], True, self.config["num_workers"],
-            self.config["pin_memory"], self._seed["g"], self._seed["seed_worker"]
-            )
-        if test_data is None:
-            return train_loader, None
-        else:
-            self.test_dataset = PointHistDataset(
-                data=test_data,
-                group=test_group,
-                label=test_label,
-                mode=self.mode,
-                num_points=self.config["num_points"],
-                bins=self.config["bins"],
-            )
-            test_loader = prep_dataloader(
-                self.test_dataset, self.config["batch_size"], False, self.config["num_workers"],
-                self.config["pin_memory"], self._seed["g"], self._seed["seed_worker"]
-                )
-            return train_loader, test_loader
-
-
-    def train(self, train_loader, test_loader, callbacks:list=None, verbose:bool=True):
+    def train(self, callbacks:list=None, verbose:bool=True):
         """ training """
         if callbacks is not None:
             self.trainer.set_callbacks(callbacks)
-        self.trainer.train(train_loader, test_loader)
+        self.trainer.train(self.train_loader, self.test_loader)
         if verbose:
             print(">> Training is done.")
 
@@ -210,6 +149,7 @@ class HistVAE(Core):
         return np.concatenate(preds), np.concatenate(probs), np.concatenate(labels)
 
 
+    # ToDo: check this
     def get_latent(self, dataset=None, indices:list=[]):
         """
         get latent representation
@@ -235,6 +175,7 @@ class HistVAE(Core):
         return np.vstack(reps)
 
 
+    # ToDo: check this
     def check_data(self, dataset, indices:list=[], output:str="", **plot_params):
         """
         check data
@@ -269,6 +210,7 @@ class HistVAE(Core):
         plot_hist(hist_list, output, **plot_params)
 
 
+    # ToDo: check this
     def qual_eval(self, dataset, query_indices, outdir:str=""):
         """
         qualitative evaluation
@@ -305,24 +247,6 @@ class HistVAE(Core):
             self.check_data(dataset, plot_indices, output, **plot_params)
             # nrows, ncols = 1, 3 (query / most similar / least similar)
         return sim_matrix
-
-
-    def load_model(self, model_path: str, config_path: str=None):
-        """ load model """
-        if config_path is not None:
-            with open(config_path, "r") as f:
-                self.config = yaml.safe_load(f)
-        # set input_shape, hard coded
-        tmp = [self.config["in_channels"]] + [self.config["bins"]] * (self.config["in_dims"])
-        self.config["input_shape"] = tuple(tmp)
-        # initialize model
-        self.init_model()
-        # load model
-        checkpoint = torch.load(model_path)
-        if "model" in checkpoint:
-            self.model.load_state_dict(checkpoint["model"])
-        if "optimizer" in checkpoint:
-            self.optimizer.load_state_dict(checkpoint["optimizer"])
 
 
 class Preprocess:

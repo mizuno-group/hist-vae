@@ -13,6 +13,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from enum import Enum
+import inspect
 
 # Enum for clearly managing data dimensions
 class DataDim(Enum):
@@ -136,7 +137,7 @@ class Decoder(nn.Module):
 
 # main ConvVAE class
 class ConvVAE(nn.Module):
-    def __init__(self, input_shape, latent_dim=128, hidden_dims=None):
+    def __init__(self, input_shape=None, latent_dim=128, hidden_dims=None):
         """
         Variational Autoencoder (VAE) for 1D, 2D, and 3D data.
 
@@ -153,6 +154,8 @@ class ConvVAE(nn.Module):
 
         """
         super().__init__()
+        # check the input
+        assert input_shape is not None, "!! input_shape must be given !!"
         self.dim = DataDim(len(input_shape) - 1)
         hidden_dims = hidden_dims or [32, 64, 128, 256]
         # Construct Encoder
@@ -222,7 +225,7 @@ class ConvVAE(nn.Module):
 
 class LinearHead(nn.Module):
     def __init__(
-            self, pretrained, latent_dim:int, num_classes:int, num_layers:int=2,
+            self, pretrained=None, latent_dim:int=None, num_classes:int=None, num_layers:int=2,
             hidden_head:int=512, dropout_head:float=0.3, frozen:bool=False
             ):
         """
@@ -243,6 +246,10 @@ class LinearHead(nn.Module):
 
         """
         super().__init__()
+        # check the input
+        assert pretrained is not None, "!! pretrained model must be given !!"
+        assert latent_dim is not None, "!! latent_dim must be given !!"
+        assert num_classes is not None, "!! num_classes must be given !!"
         # pretrained model
         self.pretrained = pretrained
         self.frozen = frozen
@@ -282,3 +289,66 @@ class LinearHead(nn.Module):
     def encode(self, x):
         mu, logvar = self.pretrained.encode(x)
         return mu, logvar
+    
+
+class ModelHandler:
+    def __init__(self, config:dict):
+        assert isinstance(config, dict), "!! config must be a dictionary !!"
+        self.config = config
+
+    def make_pretrain(self):
+        model_params = inspect.signature(ConvVAE.__init__).parameters # diff
+        model_args = {k: self.config[k] for k in model_params if k in self.config}
+        model = ConvVAE(**model_args)
+        for param in model.parameters():
+            param.requires_grad = True
+        return model
+    
+
+    def make_cpt(self, model_path):
+        """
+        conduct continuous pretraining
+
+        Parameters
+        ----------
+        model_path: str
+            path to the pretrained model
+        
+        """
+        # load the pretrained model
+        model = self.make_pretrain()
+        checkpoint = torch.load(model_path)
+        try:
+            model.load_state_dict(checkpoint["model"])
+        except KeyError:
+            # if the model is saved without a dictionary
+            model.load_state_dict(checkpoint)
+        for param in model.parameters():
+            param.requires_grad = True
+        return model
+
+
+    def make_finetune(self, model_path):
+        """
+        Parameters
+        ----------
+        model_path: str
+            path to the pretrained model
+        
+        """
+        # load the pretrained model
+        pretrained = self.make_pretrain()
+        checkpoint = torch.load(model_path)
+        try:
+            pretrained.load_state_dict(checkpoint["model"])
+        except KeyError:
+            # if the model is saved without a dictionary
+            pretrained.load_state_dict(checkpoint)
+        # prepare the linear head
+        model_params = inspect.signature(LinearHead.__init__).parameters
+        model_args = {k: self.config[k] for k in model_params if k in self.config}
+        model_args["pretrained"] = pretrained
+        model = LinearHead(**model_args)
+        for param in model.parameters():
+            param.requires_grad = True
+        return model
