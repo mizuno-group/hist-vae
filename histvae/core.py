@@ -326,6 +326,11 @@ class Preprocess:
         self.key_data = key_data
         self.key_group = key_group
         self.key_label = key_label
+        self.idx2id = None
+        self.id2idx = None
+        self.idx2label = None
+        self.label2idx = None
+        self.num_data = None
 
 
     def fit_transform(self, df):
@@ -377,14 +382,16 @@ class Preprocess:
     def get_meta(self) -> pd.DataFrame:
         """
         get meta data that contains:
-            - index
-            - group
-            - label
+            - group indices (used in training)
+            - group values
+            - label indices (used in training)
+            - label values
         
         """
         meta = pd.DataFrame({
-            "index": list(range(self.num_data)),
-            "group": list(self.idx2id.values()),
-            "label": [self.id2label[k] for k in self.idx2id.values()]
+            "group_indices": list(self.idx2id.keys()),
+            "group_values": list(self.idx2id.values()),
+            "label_indices": list(self.idx2label.keys()),
+            "label_indices": list(self.idx2id.values()),
             })
         return meta
