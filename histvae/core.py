@@ -343,15 +343,18 @@ class Preprocess:
         """
         assert self.idx2id is not None, "!! fit_transform first !!"
         if self.idx2label is None:
-            meta = pd.DataFrame({
+            meta_group = pd.DataFrame({
                 "group_indices": list(self.idx2id.keys()),
                 "group_values": list(self.idx2id.values()),
                 })
+            meta_label = None
         else:
-            meta = pd.DataFrame({
+            meta_group = pd.DataFrame({
                 "group_indices": list(self.idx2id.keys()),
                 "group_values": list(self.idx2id.values()),
+                })
+            meta_label = pd.DataFrame({
                 "label_indices": list(self.label2idx.keys()),
                 "label_values": list(self.label2idx.values()),
                 })
-        return meta
+        return meta_group, meta_label
