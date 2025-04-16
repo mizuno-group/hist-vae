@@ -90,12 +90,14 @@ class HistVAE:
             only used in "cpt" and "finetune"
         
         """
+        self.optimizer = RAdamScheduleFree(
+            self.model.parameters(), lr=float(self.config["lr"]), betas=(0.9, 0.999), weight_decay=float(self.config["weight_decay"])
+            )
         # check the mode
         assert mode in ["pretrain", "cpt", "finetune"], "!! mode must be pretrain, cpt, or finetune !!"
         if mode == "pretrain":
             # prepare pretraining model
             self.model = self.model_handler.make_pretrain()
-            self.optimizer = RAdamScheduleFree(self.model.parameters(), lr=float(self.config["lr"]), betas=(0.9, 0.999))
             self.trainer = PreTrainer(
                 self.config, self.model, self.optimizer, outdir=self.outdir
                 )
@@ -103,7 +105,6 @@ class HistVAE:
             # prepare continuous pretraining model
             assert model_path is not None, "!! model_path must be given in cpt mode!!"
             self.model = self.model_handler.make_cpt(model_path=model_path)
-            self.optimizer = RAdamScheduleFree(self.model.parameters(), lr=float(self.config["lr"]), betas=(0.9, 0.999))
             self.trainer = PreTrainer(
                 self.config, self.model, self.optimizer, outdir=self.outdir
                 )
@@ -111,7 +112,6 @@ class HistVAE:
             # prepare finetuning model
             assert model_path is not None, "!! model_path must be given in finetune mode!!"
             self.model = self.model_handler.make_finetune(model_path=model_path)
-            self.optimizer = optim.Adam(self.model.parameters(), lr=float(self.config["lr"]), betas=(0.9, 0.999))
             self.loss_fn = nn.CrossEntropyLoss()
             self.trainer = FineTuner(
                 self.config, self.model, self.optimizer, self.loss_fn, outdir=self.outdir
