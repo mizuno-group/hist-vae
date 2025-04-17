@@ -139,6 +139,7 @@ class PointHistDataset(Dataset):
         # filter the data
         unique_groups, counts = np.unique(group, return_counts=True)
         self.valid_groups = unique_groups[counts > 0]
+        self.idx2valid = {i: j for i, j in enumerate(self.valid_groups)} # map index in the dataset to the group
         # only keep groups with at least one sample
         self.num_data = len(self.valid_groups)
         if transform:
@@ -217,6 +218,7 @@ class PointHistDataset(Dataset):
         rotated_scaled0 = TF.affine(hist0, angle=angle, translate=(0,0), scale=scale, shear=0)
         rotated_scaled1 = TF.affine(hist1, angle=angle, translate=(0,0), scale=scale, shear=0)
         return rotated_scaled0, rotated_scaled1
+
 
 class DataHandler:
     def __init__(self, config:dict):
