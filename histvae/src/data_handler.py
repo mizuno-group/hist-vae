@@ -139,7 +139,7 @@ class PointHistDataset(Dataset):
         # tie the group to the data
         self.unique_groups = np.unique(group)
         self.idx2group = {i: j for i, j in enumerate(self.unique_groups)} # map index in the dataset to the group
-        self.group2idx = {v: k for k, v in self.unique_groups.items()} # map group to index in the dataset
+        self.group2idx = {v: k for k, v in self.idx2group.items()} # map group to index in the dataset
         # only keep groups with at least one sample
         self.num_data = len(self.unique_groups)
         if transform:
