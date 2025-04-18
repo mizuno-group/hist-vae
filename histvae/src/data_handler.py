@@ -263,3 +263,26 @@ class DataHandler:
         dl_args = {k: self.config[k] for k in dl_params if k in self.config}
         loader = DataLoader(dataset, **dl_args)
         return loader
+    
+
+    def make_lut(self, dataset):
+        """
+        make lookup table for the dataset
+
+        Parameters
+        ----------
+        dataset: torch.utils.data.Dataset
+            prepared Dataset instance
+
+        Returns
+        -------
+        lut: dict
+            lookup table for the dataset
+        
+        """
+        lut = {}
+        for i in range(len(dataset)):
+            group = dataset.idx2valid[i]
+            lut[group] = i
+        lut = pd.DataFrame({"group": list(lut.keys()), "idx": list(lut.values())})
+        return lut
