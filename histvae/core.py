@@ -323,6 +323,9 @@ class Preprocess:
             converted_label = None
         else:
             tmp = dict(zip(list(df[self.key_group]), list(df[self.key_label])))
+
+            print(tmp)
+
             self.lut = pd.DataFrame(
                 {"raw_index":list(range(len(tmp))), "group": list(tmp.keys()), "label": list(tmp.values())}
                 )
