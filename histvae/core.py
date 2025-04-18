@@ -327,9 +327,9 @@ class Preprocess:
                 {"raw_index":list(range(len(tmp))), "group": list(tmp.keys()), "label": list(tmp.values())}
                 )
             dic_label = dict(zip(list(self.lut["label"]), list(self.lut["raw_index"])))
-            converted_label = np.array([dic_label[k] for k in df[self.key_label].values])
+            converted_label = np.array([dic_label[k] for k in df[self.key_label].values.tolist()])
         dic_group = dict(zip(list(self.lut["group"]), list(self.lut["raw_index"])))
-        converted_group = np.array([dic_group[k] for k in df[self.key_group].values])
+        converted_group = np.array([dic_group[k] for k in df[self.key_group].values.tolist()])
         self.num_data = self.lut.shape[0] # number of data
         # data
         data = df[self.key_data].values
