@@ -286,10 +286,7 @@ class Preprocess:
         self.key_data = key_data
         self.key_group = key_group
         self.key_label = key_label
-        self.idx2id = None
-        self.id2idx = None
-        self.idx2label = None
-        self.label2idx = None
+        self.lut = None
         self.num_data = None
 
 
@@ -315,53 +312,35 @@ class Preprocess:
 
         """
         # prepare meta data and converter
-        # group, assumed to be 1D
-        group = df[self.key_group].values.flatten()
-        unique_group = np.unique(group)
-        self.idx2id = {k: v for k, v in enumerate(unique_group)} # index to identifier
-        self.id2idx = {v: k for k, v in self.idx2id.items()} # identifier to index
-        self.num_data = len(unique_group) # number of data
-        converted_group = np.array([self.id2idx[k] for k in group])
-        # label, assumed to be 1D
-        if self.key_label is not None:
-            label = df[self.key_label].values.flatten()
-            unique_label = np.unique(label)
-            self.idx2label = {k: v for k, v in enumerate(unique_label)} # index to label
-            self.label2idx = {v: k for k, v in self.idx2label.items()} # label to index
-            converted_label = np.array([self.label2idx[k] for k in label])
-        else:
-            self.idx2label = None
-            self.label2idx = None
+        # group and label are assumed to be 1D
+        if self.key_label is None:
+            group = df[self.key_group].values
+            unique_group = np.unique(group)
+            self.lut = pd.DataFrame(
+                {"raw_index":list(range(len(unique_group))), "group": unique_group}
+                )
+            self.lut[:, "label"] = None
             converted_label = None
+        else:
+            tmp = dict(zip(list(df[self.key_group]), list(df[self.key_label])))
+            self.lut = pd.DataFrame(
+                {"raw_index":list(range(len(tmp))), "group": list(tmp.keys()), "label": list(tmp.values())}
+                )
+            dic_label = dict(zip(list(self.lut["label"]), list(self.lut["raw_index"])))
+            converted_label = np.array([dic_label[k] for k in df[self.key_label].values])
+        dic_group = dict(zip(list(self.lut["group"]), list(self.lut["raw_index"])))
+        converted_group = np.array([dic_group[k] for k in df[self.key_group].values])
+        self.num_data = self.lut.shape[0] # number of data
         # data
         data = df[self.key_data].values
         data = data.astype(np.float32)
         return data, converted_group, converted_label
 
 
-    def get_meta(self) -> pd.DataFrame:
+    def get_lut(self) -> pd.DataFrame:
         """
-        get meta data that contains:
-            - group indices (used in training)
-            - group values
-            - label indices (used in training)
-            - label values
-        
+        get lookup table
+                
         """
-        assert self.idx2id is not None, "!! fit_transform first !!"
-        if self.idx2label is None:
-            meta_group = pd.DataFrame({
-                "group_indices": list(self.idx2id.keys()),
-                "group_values": list(self.idx2id.values()),
-                })
-            meta_label = None
-        else:
-            meta_group = pd.DataFrame({
-                "group_indices": list(self.idx2id.keys()),
-                "group_values": list(self.idx2id.values()),
-                })
-            meta_label = pd.DataFrame({
-                "label_indices": list(self.label2idx.keys()),
-                "label_values": list(self.label2idx.values()),
-                })
-        return meta_group, meta_label
+        assert self.lut is not None, "!! fit_transform first !!"
+        return self.lut
