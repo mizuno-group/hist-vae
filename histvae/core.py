@@ -357,4 +357,4 @@ class Preprocess:
                 "label_indices": list(self.label2idx.keys()),
                 "label_values": list(self.label2idx.values()),
                 })
-        return meta_group, meta_label
+        return meta_label, meta_group
