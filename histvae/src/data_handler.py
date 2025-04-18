@@ -142,10 +142,11 @@ class PointHistDataset(Dataset):
         self.group2idx = {v: k for k, v in self.idx2group.items()} # map group to index in the dataset
         # only keep groups with at least one sample
         self.num_data = len(self.unique_groups)
+        self.transform = transform
         if transform:
-            self.transform = self.rotate_scale_2d
+            self._transform_fxn = self.rotate_scale_2d
         else:
-            self.transform = lambda x, y: (x, y)
+            self._transform_fxn = lambda x, y: (x, y)
 
 
     def __len__(self):
@@ -175,7 +176,7 @@ class PointHistDataset(Dataset):
         hist0 = torch.tensor(hist0, dtype=torch.float32).unsqueeze(0) # add channel dimension
         hist1 = torch.tensor(hist1, dtype=torch.float32).unsqueeze(0) # add channel dimension
         # transform
-        hist0, hist1 = self.transform(hist0, hist1)
+        hist0, hist1 = self._transform_fxn(hist0, hist1)
         # prepare label
         if self.label is not None:
             label = self.label[selected_indices][0]
@@ -218,6 +219,24 @@ class PointHistDataset(Dataset):
         rotated_scaled0 = TF.affine(hist0, angle=angle, translate=(0,0), scale=scale, shear=0)
         rotated_scaled1 = TF.affine(hist1, angle=angle, translate=(0,0), scale=scale, shear=0)
         return rotated_scaled0, rotated_scaled1
+
+
+    def transform_on(self):
+        """
+        transform on
+
+        """
+        self.transform = True
+        self._transform_fxn = self.rotate_scale_2d
+
+
+    def transform_off(self):
+        """
+        transform off
+
+        """
+        self.transform = False
+        self._transform_fxn = lambda x, y: (x, y)
 
 
 class DataHandler:

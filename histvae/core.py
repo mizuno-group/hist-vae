@@ -177,6 +177,7 @@ class HistVAE:
         if self.model is None:
             raise ValueError("!! fit or load_model first !!")
         self.model.eval()
+        dataset.transform_off() # disable transform
         num_data = len(dataset)
         if len(indices) == 0:
             indices = list(range(num_data))
