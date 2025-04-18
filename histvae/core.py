@@ -40,6 +40,8 @@ class HistVAE:
         self.test_dataset = None
         self.train_loader = None
         self.test_loader = None
+        self.train_lut = None
+        self.test_lut = None
         self.model = None
         self.trainer = None
         self.optimizer = None
@@ -73,6 +75,11 @@ class HistVAE:
         self.train_loader = self.data_handler.make_dataloader(dataset=self.train_dataset)
         if self.test_dataset is not None:
             self.test_loader = self.data_handler.make_dataloader(dataset=self.test_dataset)
+        # lookup table
+        self.train_lut = self.data_handler.make_lut(dataset=self.train_dataset)
+        self.test_lut = None
+        if self.test_dataset is not None:
+            self.test_lut = self.data_handler.make_lut(dataset=self.test_dataset)
 
 
     def prep_model(self, mode="pretrain", model_path:str=None):
