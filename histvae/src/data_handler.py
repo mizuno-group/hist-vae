@@ -136,12 +136,12 @@ class PointHistDataset(Dataset):
         self.bins = bins
         self.num_points = num_points
         self.noise = noise or (1 / num_points)
-        # filter the data
-        unique_groups, counts = np.unique(group, return_counts=True)
-        self.valid_groups = unique_groups[counts > 0]
-        self.idx2valid = {i: j for i, j in enumerate(self.valid_groups)} # map index in the dataset to the group
+        # tie the group to the data
+        self.unique_groups = np.unique(group)
+        self.idx2group = {i: j for i, j in enumerate(self.unique_groups)} # map index in the dataset to the group
+        self.group2idx = {v: k for k, v in self.unique_groups.items()} # map group to index in the dataset
         # only keep groups with at least one sample
-        self.num_data = len(self.valid_groups)
+        self.num_data = len(self.unique_groups)
         if transform:
             self.transform = self.rotate_scale_2d
         else:
@@ -154,7 +154,7 @@ class PointHistDataset(Dataset):
 
     def __getitem__(self, idx):
         # get the indicated data
-        group_idx = self.valid_groups[idx]
+        group_idx = self.idx2group[idx]
         selected_indices = np.where(self.group == group_idx)[0]
         pointcloud = self.data[selected_indices]
         # limit the number of points if necessary (random sampling)
@@ -282,7 +282,7 @@ class DataHandler:
         """
         lut = {}
         for i in range(len(dataset)):
-            group = dataset.idx2valid[i]
+            group = dataset.idx2group[i]
             lut[group] = i
         lut = pd.DataFrame({"group": list(lut.keys()), "idx": list(lut.values())})
         return lut
