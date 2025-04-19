@@ -4,8 +4,9 @@ Created on Tue Jul 23 12:09:08 2019
  
 Histogram Variational Autoencoder (VAE) for 1D, 2D, and 3D data.
 
-route2
-- add dropout layer
+route 6
+- change the decoder last layer to relu
+- change recon_loss to MSE
 
 @author: tadahaya
 """
@@ -128,7 +129,7 @@ class Decoder(nn.Module):
             )
             in_channels = h_dim
         layers.append(
-            ResidualConvTransposeBlock(in_channels, out_channels, kernel_size=4, stride=2, padding=1, activation="sigmoid", dim=dim)
+            ResidualConvTransposeBlock(in_channels, out_channels, kernel_size=4, stride=2, padding=1, activation="relu", dim=dim)
         )
         self.decoder = nn.Sequential(*layers)
 
@@ -216,7 +217,7 @@ class ConvVAE(nn.Module):
         """
 
         batch_size = x.size(0)
-        recon_loss = F.binary_cross_entropy(recon_x, x, reduction="sum") / batch_size
+        recon_loss = F.mse_loss(recon_x, x, reduction="sum") / batch_size
         # for clear understanding, we use sum instead of mean
         kl_loss = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp()) / batch_size
         total_loss = recon_loss + beta * kl_loss
