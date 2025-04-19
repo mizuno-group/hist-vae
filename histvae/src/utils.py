@@ -129,13 +129,13 @@ def load_experiments(model, optimizer, resdir, checkpoint_name="model_final"):
 
 def progress_plot(
         outdir:str, train_values:list, test_values:list=[],
-        xlabel="epoch", ylabel="loss"
+        xlabel="epoch", ylabel="loss", fontsize=14
         ):
     """ plot learning progress """
     fileout = os.path.join(outdir, f"progress_{ylabel}.tif")
     x = list(range(1, len(train_values) + 1, 1))
     fig, ax = plt.subplots()
-    plt.rcParams['font.size'] = 14
+    plt.rcParams['font.size'] = fontsize
     ax.plot(x, train_values, c='navy', label='train')
     if len(test_values) > 0:
         ax.plot(x, test_values, c='darkgoldenrod', label='test')
