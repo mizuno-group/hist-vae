@@ -48,7 +48,7 @@ class HistVAE:
         self.loss_fn = None
         # fix seed
         g, seed_worker = fix_seed(seed, fix_cuda=True)
-        self._seed = {"seed": seed, "g": g, "seed_worker": seed_worker}
+        self._seed = {"seed": seed, "generator": g, "worker_init_fn": seed_worker}
         # loading
         self.device = self.config.get("device", "cuda" if torch.cuda.is_available() else "cpu")
         if exp_name is None:
