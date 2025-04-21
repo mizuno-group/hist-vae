@@ -140,13 +140,14 @@ class PointHistDataset(Dataset):
         self.unique_groups = np.unique(group)
         self.idx2group = {i: j for i, j in enumerate(self.unique_groups)} # map index in the dataset to the group
         self.group2idx = {v: k for k, v in self.idx2group.items()} # map group to index in the dataset
-        # only keep groups with at least one sample
         self.num_data = len(self.unique_groups)
         self.transform = transform
         if transform:
             self._transform_fxn = self.rotate_scale_2d
         else:
             self._transform_fxn = lambda x, y: (x, y)
+        # store normalization parameters
+        self.log1p_max = dict()
 
 
     def __len__(self):
@@ -175,7 +176,9 @@ class PointHistDataset(Dataset):
         hist1 = self.add_noise(hist1, self.noise) # add noise to the histogram
         # normalize the histogram
         hist0 = np.log1p(hist0) # log1p for numerical stability
-        hist0 = hist0 / np.max(hist0) # normalize
+        tmp = np.max(hist0) # store the max value for normalization
+        self.log1p_max[idx] = tmp
+        hist0 = hist0 / tmp # normalize
         hist1 = np.log1p(hist1) # log1p for numerical stability
         hist1 = hist1 / np.max(hist1) # normalize
         hist0 = torch.tensor(hist0, dtype=torch.float32).unsqueeze(0) # add channel dimension
