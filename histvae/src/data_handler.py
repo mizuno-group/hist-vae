@@ -239,6 +239,26 @@ class PointHistDataset(Dataset):
         self._transform_fxn = lambda x, y: (x, y)
 
 
+class PointHistDataLoader(DataLoader):
+    def __init__(
+            self, dataset, batch_size, shuffle=False, num_workers=2,
+            pin_memory=True, generator=None, worker_init_fn=None
+            ):
+        """
+        My DataLoader to support the custom dataset
+        
+        """
+        super().__init__(
+            dataset=dataset,
+            batch_size=batch_size,
+            shuffle=shuffle,
+            num_workers=num_workers,
+            pin_memory=pin_memory,
+            generator=generator,
+            worker_init_fn=worker_init_fn,
+            )
+
+
 class DataHandler:
     def __init__(self, config:dict):
         assert isinstance(config, dict), "!! config must be a dictionary !!"
@@ -267,7 +287,7 @@ class DataHandler:
         return dataset
 
 
-    def make_dataloader(self, dataset):
+    def make_dataloader(self, dataset, mode="train"):
         """
         prepare train and test loader
         
@@ -275,12 +295,20 @@ class DataHandler:
         ----------
         dataset: torch.utils.data.Dataset
             prepared Dataset instance
+
+        mode: str
+            "train" or "test"
                 
         """
+        # check the input
+        assert isinstance(dataset, Dataset), "!! dataset must be a torch.utils.data.Dataset !!"
+        assert mode in ["train", "test"], "!! mode must be 'train' or 'test' !!"
         # create dataloader
-        dl_params = inspect.signature(DataLoader.__init__).parameters # diff
-        dl_args = {k: self.config[k] for k in dl_params if k in self.config}
-        loader = DataLoader(dataset, **dl_args)
+        dl_params = inspect.signature(PointHistDataLoader.__init__).parameters
+        # note: only child class PointHistDataLoader arguments are extracted
+        dl_args = {k: self.config[k] for k in dl_params if k in self.config and k not in ["dataset", "shuffle"]}
+        shuffle = True if mode == "train" else False
+        loader = PointHistDataLoader(dataset=dataset, shuffle=shuffle, **dl_args)
         return loader
     
 
