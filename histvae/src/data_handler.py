@@ -170,9 +170,14 @@ class PointHistDataset(Dataset):
             idxs1 = np.random.choice(pointcloud.shape[0], self.num_points, replace=True)
             pointcloud1 = pointcloud[idxs1, :]
         # prepare histogram
-        hist0 = calc_hist(pointcloud0, bins=self.bins) / self.num_points
-        hist1 = calc_hist(pointcloud1, bins=self.bins) / self.num_points
+        hist0 = calc_hist(pointcloud0, bins=self.bins)
+        hist1 = calc_hist(pointcloud1, bins=self.bins)
         hist1 = self.add_noise(hist1, self.noise) # add noise to the histogram
+        # normalize the histogram
+        hist0 = np.log1p(hist0) # log1p for numerical stability
+        hist0 = hist0 / np.max(hist0) # normalize
+        hist1 = np.log1p(hist1) # log1p for numerical stability
+        hist1 = hist1 / np.max(hist1) # normalize
         hist0 = torch.tensor(hist0, dtype=torch.float32).unsqueeze(0) # add channel dimension
         hist1 = torch.tensor(hist1, dtype=torch.float32).unsqueeze(0) # add channel dimension
         # transform

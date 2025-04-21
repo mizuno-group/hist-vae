@@ -130,8 +130,9 @@ class Decoder(nn.Module):
             in_channels = h_dim
         layers.append(
             ResidualConvTransposeBlock(
-                in_channels, out_channels, kernel_size=4, stride=2, padding=1, activation="linear", dim=dim
+                in_channels, out_channels, kernel_size=4, stride=2, padding=1, activation="sigmoid", dim=dim
                 )
+            # histogram data is normalized to [0, 1]
         )
         self.decoder = nn.Sequential(*layers)
 
