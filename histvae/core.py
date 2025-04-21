@@ -76,9 +76,9 @@ class HistVAE:
                 data=test_data, group=test_group, label=test_label, transform=test_transform
                 )
         # dataloader
-        self.train_loader = self.data_handler.make_dataloader(dataset=self.train_dataset)
+        self.train_loader = self.data_handler.make_dataloader(dataset=self.train_dataset, mode="train")
         if self.test_dataset is not None:
-            self.test_loader = self.data_handler.make_dataloader(dataset=self.test_dataset)
+            self.test_loader = self.data_handler.make_dataloader(dataset=self.test_dataset, mode="test")
         # lookup table
         self.train_lut = self.data_handler.make_lut(dataset=self.train_dataset)
         self.test_lut = None
