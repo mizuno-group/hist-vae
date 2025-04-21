@@ -129,7 +129,9 @@ class Decoder(nn.Module):
             )
             in_channels = h_dim
         layers.append(
-            ResidualConvTransposeBlock(in_channels, out_channels, kernel_size=4, stride=2, padding=1, activation="relu", dim=dim)
+            ResidualConvTransposeBlock(
+                in_channels, out_channels, kernel_size=4, stride=2, padding=1, activation="linear", dim=dim
+                )
         )
         self.decoder = nn.Sequential(*layers)
 
@@ -172,6 +174,8 @@ class ConvVAE(nn.Module):
         self.fc_logvar = nn.Linear(enc_out_dim, latent_dim)
         # mapping from latent space to reconstruction features
         self.fc_decode = nn.Linear(latent_dim, enc_out_dim)
+        nn.init.xavier_uniform_(self.fc_decode.weight)
+        nn.init.zeros_(self.fc_decode.bias)
         # Construct Decoder
         self.decoder = Decoder(input_shape[0], hidden_dims, dim=self.dim)
 
@@ -281,7 +285,7 @@ class LinearHead(nn.Module):
 
     def vae_loss(self, recon_x, x, mu, logvar, beta=1.0):
         batch_size = x.size(0)
-        recon_loss = F.binary_cross_entropy(recon_x, x, reduction="sum") / batch_size
+        recon_loss = F.mse_loss(recon_x, x, reduction="sum") / batch_size
         kl_loss = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp()) / batch_size
         total_loss = recon_loss + beta * kl_loss
         return total_loss, recon_loss, kl_loss
