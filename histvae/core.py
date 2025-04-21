@@ -227,9 +227,9 @@ class HistVAE:
             }
         
         """
-        hist_list = [dataset[i][0][0].numpy()[0] for i in indices] # ((hist, hist), label)
-        # restore original hist
-        hist_list = [np.exp(hist_list[i] * dataset.log1p_max[i]) - 1 for i in indices]
+        # restore original histogram
+        hist_list = [dataset[i][0][0].numpy()[0] * dataset.log1p_max[i] for i in indices] # ((hist, hist), label)
+        hist_list = [np.exp(h) - 1 for h in hist_list]
         plot_hist(hist_list, output, **plot_params)
 
 
