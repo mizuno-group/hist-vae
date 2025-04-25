@@ -14,7 +14,7 @@ from schedulefree import RAdamScheduleFree
 import numpy as np
 import pandas as pd
 import os, yaml
-import inspect
+from matplotlib import pyplot as plt
 from datetime import datetime
 
 from .src.models import ModelHandler
@@ -295,6 +295,9 @@ class Preprocess:
         self.key_label = key_label
         self.lut = None
         self.num_data = None
+        self.data = None
+        self.group = None
+        self.label = None
 
 
     def fit_transform(self, df):
@@ -341,6 +344,10 @@ class Preprocess:
         # data
         data = df[self.key_data].values
         data = data.astype(np.float32)
+        # register
+        self.data = data
+        self.group = converted_group
+        self.label = converted_label
         return data, converted_group, converted_label
 
 
@@ -351,3 +358,202 @@ class Preprocess:
         """
         assert self.lut is not None, "!! fit_transform first !!"
         return self.lut
+    
+
+    def check_transform(
+            self, raw_data, group, indices:list=[], num_points:int=4096, bins:int=64,
+            **plot_params
+            ):
+        """
+        check transform
+
+        Parameters
+        ----------
+        raw_data: np.ndarray
+            the data to be checked
+
+        indices: list
+            the list of indices to be checked
+
+        """
+        list_hist = []
+        list_raw = []
+        list_title = []
+        for idx in indices:
+            # raw data
+            mask = np.where(group == idx)[0]
+            raw = raw_data[mask]
+            # converted data
+            hist = self.to_hist(raw_data, group, idx, num_points=num_points, bins=bins)
+            # summary
+            list_raw.append(raw)
+            list_hist.append(hist)
+            list_title.append(f"Group_{idx}")
+        # plot
+        plot_scatter(points_list=list_raw, title_list=list_title, **plot_params)
+        plot_hist(hist_list=list_hist, title_list=list_title, **plot_params)
+
+
+    def to_hist(self, raw_data, group, idx:int, num_points:int=4096, bins=64):
+        """
+        convert to histogram
+
+        """
+        selected_indices = np.where(group == idx)[0]
+        pointcloud = raw_data[selected_indices]
+        if pointcloud.shape[0] > num_points:
+            idxs0 = np.random.choice(pointcloud.shape[0], num_points, replace=False)
+            pointcloud0 = pointcloud[idxs0, :]
+        else:
+            idxs0 = np.random.choice(pointcloud.shape[0], num_points, replace=True)
+            pointcloud0 = pointcloud[idxs0, :]
+        # prepare histogram
+        hist0 = calc_hist(pointcloud0, bins=bins)
+        # normalize the histogram
+        hist0 = np.log1p(hist0) # log1p for numerical stability
+        tmp = np.max(hist0) # store the max value for normalization
+        hist0 = hist0 / tmp # normalize
+        return hist0
+
+
+def calc_hist(X, bins=16):
+    try:
+        s = X.shape[1]
+    except IndexError:
+        s = 1
+    if s == 1:
+        hist, _ = np.histogram(X, bins=bins, density=False)
+    elif s == 2:
+        hist, _, _ = np.histogram2d(X[:, 0], X[:, 1], bins=bins, density=False)
+    elif s == 3:
+        hist, _ = np.histogramdd(X, bins=bins, density=False)
+    else:
+        raise ValueError("!! Input array must be 1D, 2D, or 3D. !!")
+    return hist
+
+
+def plot_hist(hist_list, output="", **plot_params):
+    """
+    Plot histograms (1D, 2D).
+
+    Parameters:
+    ----------
+    hist_list : list of np.ndarray
+        List of histograms to plot.
+
+    output : str, optional
+        File path to save the plot (default: "", meaning no save).
+
+    **plot_params : dict, optional
+        Dictionary containing plot customization options:
+            - xlabel (str): Label for x-axis
+            - ylabel (str): Label for y-axis
+            - title_list (list of str): Titles for each subplot
+            - cmap (str): Colormap for 2D histograms
+            - aspect (str): Aspect ratio for 2D histograms (default: 'equal')
+            - color (str): Bar color for 1D histograms (default: 'royalblue')
+            - alpha (float): Transparency for 1D histograms (default: 0.7)
+    """
+    # Default plot parameters
+    default_params = {
+        "nrow": 1,
+        "ncol": 3,
+        "xlabel": "x",
+        "ylabel": "y",
+        "title_list": None,
+        "cmap": "viridis",
+        "aspect": "equal",
+        "color": "royalblue",
+        "alpha": 0.7
+    }
+    # merge default and custom params
+    params = {**default_params, **plot_params}
+    num_plots = len(hist_list)
+    nrow, ncol = params["nrow"], params["ncol"]
+    fig, axes = plt.subplots(nrow, ncol, figsize=(5 * ncol, 5 * nrow))
+    axes = np.atleast_1d(axes).flatten()  # Flatten for easy iteration
+    for i, hist in enumerate(hist_list):
+        ax = axes[i]
+        dim = hist.ndim  # Detect dimensionality
+        if dim == 1:
+            ax.bar(range(len(hist)), hist, width=0.8, color=params["color"], alpha=params["alpha"])
+            ax.set_xlabel(params["xlabel"])
+            ax.set_ylabel(params["ylabel"])
+            ax.set_title(params["title_list"][i] if params["title_list"] else f'1D Histogram {i+1}')
+        elif dim == 2:
+            im = ax.imshow(hist.T, origin='lower', cmap=params["cmap"], aspect=params["aspect"])
+            fig.colorbar(im, ax=ax, label=params["ylabel"])
+            ax.set_xlabel(params["xlabel"])
+            ax.set_ylabel(params["ylabel"])
+            ax.set_title(params["title_list"][i] if params["title_list"] else f'2D Histogram {i+1}')
+        else:
+            raise NotImplementedError("Only 1D and 2D histograms are supported.")
+    # Remove unused subplots
+    for j in range(num_plots, len(axes)):
+        fig.delaxes(axes[j])
+    plt.tight_layout()
+    if output:
+        plt.savefig(output)
+    plt.show()
+    plt.close()
+
+
+def plot_scatter(points_list, output="", **plot_params):
+    """
+    Plot scatter plots from list of 2D point arrays.
+
+    Parameters
+    ----------
+    points_list : list of np.ndarray
+        List of 2D point arrays (each of shape (N, 2)).
+
+    output : str, optional
+        File path to save the plot (default: "", meaning no save).
+
+    **plot_params : dict, optional
+        Plot customization options:
+            - xlabel (str): Label for x-axis
+            - ylabel (str): Label for y-axis
+            - title_list (list of str): Titles for each subplot
+            - color (str): Point color (default: 'royalblue')
+            - alpha (float): Point transparency (default: 0.7)
+            - s (float): Point size (default: 10)
+            - nrow (int): Number of rows in subplot grid
+            - ncol (int): Number of columns in subplot grid
+    """
+    # Default parameters
+    default_params = {
+        "nrow": 1,
+        "ncol": 3,
+        "xlabel": "x",
+        "ylabel": "y",
+        "title_list": None,
+        "color": "royalblue",
+        "alpha": 0.7,
+        "s": 10
+    }
+    params = {**default_params, **plot_params}
+    num_plots = len(points_list)
+    nrow, ncol = params["nrow"], params["ncol"]
+    fig, axes = plt.subplots(nrow, ncol, figsize=(5 * ncol, 5 * nrow))
+    axes = np.atleast_1d(axes).flatten()  # Flatten to 1D array for iteration
+    for i, points in enumerate(points_list):
+        ax = axes[i]
+        if points.ndim != 2 or points.shape[1] != 2:
+            raise ValueError(f"Expected shape (N, 2), got {points.shape}")
+        ax.scatter(points[:, 0], points[:, 1],
+                   color=params["color"],
+                   alpha=params["alpha"],
+                   s=params["s"])
+        ax.set_xlabel(params["xlabel"])
+        ax.set_ylabel(params["ylabel"])
+        ax.set_title(params["title_list"][i] if params["title_list"] else f'Scatter {i+1}')
+        ax.grid(True)
+    # Remove any unused subplots
+    for j in range(num_plots, len(axes)):
+        fig.delaxes(axes[j])
+    plt.tight_layout()
+    if output:
+        plt.savefig(output)
+    plt.show()
+    plt.close()

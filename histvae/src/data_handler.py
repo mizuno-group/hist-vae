@@ -41,8 +41,10 @@ def plot_hist(hist_list, output="", **plot_params):
     ----------
     hist_list : list of np.ndarray
         List of histograms to plot.
+
     output : str, optional
         File path to save the plot (default: "", meaning no save).
+
     **plot_params : dict, optional
         Dictionary containing plot customization options:
             - xlabel (str): Label for x-axis
