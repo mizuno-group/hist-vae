@@ -102,7 +102,7 @@ def plot_hist(hist_list, output="", **plot_params):
 class PointHistDataset(Dataset):
     def __init__(
             self, data, group, label=None, transform=False,
-            num_points=768, bins=64, noise=None
+            num_points=768, bins=64, noise=None, **transform_params
             ):
         """
         Parameters
@@ -145,7 +145,8 @@ class PointHistDataset(Dataset):
         self.num_data = len(self.unique_groups)
         self.transform = transform
         if transform:
-            self._transform_fxn = self.rotate_scale_2d
+            trans = PCAugmentation(**transform_params)
+            self._transform_fxn = trans
         else:
             self._transform_fxn = lambda x, y: (x, y)
         # store normalization parameters
@@ -175,7 +176,6 @@ class PointHistDataset(Dataset):
         # prepare histogram
         hist0 = calc_hist(pointcloud0, bins=self.bins)
         hist1 = calc_hist(pointcloud1, bins=self.bins)
-        hist1 = self.add_noise(hist1, self.noise) # add noise to the histogram
         # normalize the histogram
         hist0 = np.log1p(hist0) # log1p for numerical stability
         tmp = np.max(hist0) # store the max value for normalization
@@ -183,10 +183,13 @@ class PointHistDataset(Dataset):
         hist0 = hist0 / tmp # normalize
         hist1 = np.log1p(hist1) # log1p for numerical stability
         hist1 = hist1 / np.max(hist1) # normalize
-        hist0 = torch.tensor(hist0, dtype=torch.float32).unsqueeze(0) # add channel dimension
-        hist1 = torch.tensor(hist1, dtype=torch.float32).unsqueeze(0) # add channel dimension
+        hist0 = torch.tensor(hist0, dtype=torch.float32)
+        hist1 = torch.tensor(hist1, dtype=torch.float32).unsqueeze(0)
         # transform
-        hist0, hist1 = self._transform_fxn(hist0, hist1)
+        hist1 = self._transform_fxn(hist1) # hist1 only like translation
+        # add channel dimension
+        hist0 = hist0.unsqueeze(0)
+        hist1 = hist1.unsqueeze(0)
         # prepare label
         if self.label is not None:
             label = self.label[selected_indices][0]
@@ -198,46 +201,14 @@ class PointHistDataset(Dataset):
         # hist0, original; hist1, noisy
     
 
-    def add_noise(self, hist, noise=0.001):
-        """
-        add noise to the histogram
-        """
-        noise = np.random.normal(0, noise, hist.shape)
-        noise = np.where(hist > 0, noise, 0.0)
-        hist += noise
-        return np.clip(hist, 0.0, None)
-
-
-    def rotate_scale_2d(self, hist0, hist1, angle_range=(-180,180), scale_range=(0.8,1.2)):
-        """
-        Parameters
-        ----------
-        hist0, hist1: torch.Tensor
-            2D histogram to be rotated and scaled with shape (1, H, W)
-
-        angle_range: tuple
-            range of rotation angle (degree)
-
-        scale_range: tuple
-            range of scale factor
-
-        """
-        # sample random angle and scale
-        angle = random.uniform(*angle_range)
-        scale = random.uniform(*scale_range)
-        # rotate and scale
-        rotated_scaled0 = TF.affine(hist0, angle=angle, translate=(0,0), scale=scale, shear=0)
-        rotated_scaled1 = TF.affine(hist1, angle=angle, translate=(0,0), scale=scale, shear=0)
-        return rotated_scaled0, rotated_scaled1
-
-
-    def transform_on(self):
+    def transform_on(self, **transform_params):
         """
         transform on
 
         """
         self.transform = True
-        self._transform_fxn = self.rotate_scale_2d
+        trans = PCAugmentation(**transform_params)
+        self._transform_fxn = trans
 
 
     def transform_off(self):
@@ -247,6 +218,60 @@ class PointHistDataset(Dataset):
         """
         self.transform = False
         self._transform_fxn = lambda x, y: (x, y)
+
+# ToDo test this
+class PCAugmentation:
+    def __init__(self,
+                 jitter_sigma=0.01,   # Standard deviation of jitter noise (adjustable)
+                 jitter_clip=0.03,    # Maximum jitter noise magnitude
+                 scale_range=(0.98, 1.02),  # Scaling range (restricted within ±2%)
+                 translate_range=0.05,      # Translation range (small absolute range)
+                 dropout_rate=0.05          # Dropout rate for points
+                 ):
+        self.jitter_sigma = jitter_sigma
+        self.jitter_clip = jitter_clip
+        self.scale_range = scale_range
+        self.translate_range = translate_range
+        self.dropout_rate = dropout_rate
+
+    def jitter(self, points):
+        jitter_noise = torch.clamp(
+            self.jitter_sigma * torch.randn_like(points),
+            -self.jitter_clip,
+            self.jitter_clip
+        )
+        points_jittered = points + jitter_noise
+        # Clip negative values to zero since coordinates must be positive
+        return torch.clamp(points_jittered, min=0)
+
+    def scale(self, points):
+        scale = torch.empty(1).uniform_(*self.scale_range).to(points.device)
+        return points * scale
+
+    def translate(self, points):
+        translation = torch.empty(points.size(-1)).uniform_(
+            -self.translate_range,
+            self.translate_range
+        ).to(points.device)
+        points_translated = points + translation
+        # Clip negative values to zero
+        return torch.clamp(points_translated, min=0)
+
+    def dropout(self, points):
+        num_points = points.size(0)
+        keep_prob = 1 - self.dropout_rate
+        keep_mask = torch.rand(num_points, device=points.device) < keep_prob
+        if keep_mask.sum() == 0:
+            # Ensure at least one point remains
+            keep_mask[torch.randint(0, num_points, (1,))] = True
+        return points[keep_mask]
+
+    def __call__(self, points):
+        points = self.jitter(points)
+        points = self.scale(points)
+        points = self.translate(points)
+        points = self.dropout(points)
+        return points
 
 
 class PointHistDataLoader(DataLoader):
