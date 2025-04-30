@@ -149,6 +149,8 @@ class PointHistDataset(Dataset):
             self._transform_fxn = trans
         else:
             self._transform_fxn = lambda x, y: (x, y)
+        # store normalization parameters
+        self.log1p_max = dict()
 
 
     def __len__(self):
@@ -176,7 +178,9 @@ class PointHistDataset(Dataset):
         hist1 = calc_hist(pointcloud1, bins=self.bins)
         # normalize the histogram
         hist0 = np.log1p(hist0) # log1p for numerical stability
-        hist0 = hist0 / np.max(hist0) # normalize
+        tmp = np.max(hist0) # store the max value for normalization
+        self.log1p_max[idx] = tmp
+        hist0 = hist0 / tmp # normalize
         hist1 = np.log1p(hist1) # log1p for numerical stability
         hist1 = hist1 / np.max(hist1) # normalize
         hist0 = torch.tensor(hist0, dtype=torch.float32)
@@ -222,13 +226,11 @@ class PCAugmentation:
                  jitter_clip=0.03,    # Maximum jitter noise magnitude
                  scale_range=(0.98, 1.02),  # Scaling range (restricted within ±2%)
                  translate_range=0.05,      # Translation range (small absolute range)
-                 dropout_rate=0.05          # Dropout rate for points
                  ):
         self.jitter_sigma = jitter_sigma
         self.jitter_clip = jitter_clip
         self.scale_range = scale_range
         self.translate_range = translate_range
-        self.dropout_rate = dropout_rate
 
     def jitter(self, points):
         jitter_noise = torch.clamp(
@@ -253,20 +255,10 @@ class PCAugmentation:
         # Clip negative values to zero
         return torch.clamp(points_translated, min=0)
 
-    def dropout(self, points):
-        num_points = points.size(0)
-        keep_prob = 1 - self.dropout_rate
-        keep_mask = torch.rand(num_points, device=points.device) < keep_prob
-        if keep_mask.sum() == 0:
-            # Ensure at least one point remains
-            keep_mask[torch.randint(0, num_points, (1,))] = True
-        return points[keep_mask]
-
     def __call__(self, points):
         points = self.jitter(points)
         points = self.scale(points)
         points = self.translate(points)
-        points = self.dropout(points)
         return points
 
 
