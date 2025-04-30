@@ -149,8 +149,6 @@ class PointHistDataset(Dataset):
             self._transform_fxn = trans
         else:
             self._transform_fxn = lambda x, y: (x, y)
-        # store normalization parameters
-        self.log1p_max = dict()
 
 
     def __len__(self):
@@ -178,9 +176,7 @@ class PointHistDataset(Dataset):
         hist1 = calc_hist(pointcloud1, bins=self.bins)
         # normalize the histogram
         hist0 = np.log1p(hist0) # log1p for numerical stability
-        tmp = np.max(hist0) # store the max value for normalization
-        self.log1p_max[idx] = tmp
-        hist0 = hist0 / tmp # normalize
+        hist0 = hist0 / np.max(hist0) # normalize
         hist1 = np.log1p(hist1) # log1p for numerical stability
         hist1 = hist1 / np.max(hist1) # normalize
         hist0 = torch.tensor(hist0, dtype=torch.float32)
