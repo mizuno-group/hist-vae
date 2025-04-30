@@ -217,7 +217,7 @@ class PointHistDataset(Dataset):
 
         """
         self.transform = False
-        self._transform_fxn = lambda x, y: (x, y)
+        self._transform_fxn = lambda x: x
 
 # ToDo test this
 class PCAugmentation:
