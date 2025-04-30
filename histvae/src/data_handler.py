@@ -148,7 +148,7 @@ class PointHistDataset(Dataset):
             trans = PCAugmentation(**transform_params)
             self._transform_fxn = trans
         else:
-            self._transform_fxn = lambda x, y: (x, y)
+            self._transform_fxn = lambda x: x
         # store normalization parameters
         self.log1p_max = dict()
 
