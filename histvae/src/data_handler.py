@@ -184,7 +184,7 @@ class PointHistDataset(Dataset):
         hist1 = np.log1p(hist1) # log1p for numerical stability
         hist1 = hist1 / np.max(hist1) # normalize
         hist0 = torch.tensor(hist0, dtype=torch.float32)
-        hist1 = torch.tensor(hist1, dtype=torch.float32).unsqueeze(0)
+        hist1 = torch.tensor(hist1, dtype=torch.float32)
         # transform
         hist1 = self._transform_fxn(hist1) # hist1 only like translation
         # add channel dimension

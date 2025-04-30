@@ -64,7 +64,7 @@ class HistVAE:
             ):
         """ prepare data """
         if train_transform is None:
-            train_transform = self.config.get("transform_2d", True)
+            train_transform = self.config.get("transform", True)
         if test_transform is None:
             test_transform = False
         # dataset
