@@ -26,6 +26,11 @@ class HistVAE:
     def __init__(
             self, config: dict=None, outdir: str=None, exp_name: str=None, seed: int=42
             ):
+
+
+        print("DEBUG: INITIALIZE HistVAE")
+
+
         # arguments
         assert config is not None, "!! config must be given !!"
         self.config = config
