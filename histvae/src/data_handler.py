@@ -189,7 +189,6 @@ class PointHistDataset(Dataset):
 
 
 
-        print("DEBUG --- self.calc_hist =", self.calc_hist)
         print("DEBUG --- type =", type(self.calc_hist))
         print("DEBUG --- is method? =", hasattr(self.calc_hist, "__self__"))
         print("DEBUG --- func code obj =", getattr(self.calc_hist, '__code__', None))
@@ -388,11 +387,6 @@ class DataHandler:
         if transform is not None:
             ds_args["transform"] = transform
         # create dataset
-
-
-        print("DEBUG --- ds_args =", ds_args)
-
-
         dataset = PointHistDataset(**ds_args)
         return dataset
 
