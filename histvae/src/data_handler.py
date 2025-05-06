@@ -370,7 +370,6 @@ class DataHandler:
             data=data,
             group=group,
             label=label,
-            max_vals=max_vals,
             transform=transform,
             **ds_args
             )
