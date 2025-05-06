@@ -362,7 +362,12 @@ class DataHandler:
         if transform is not None:
             ds_args["transform"] = transform
 
+
+        print(">>>>>>>>>>>>>>>>>>>>")
+        print(ds_params)
+        print(">>>>>>>>>>>>>>>>>>>>")
         print(ds_args)
+        print(">>>>>>>>>>>>>>>>>>>>")
 
         # create dataset
         dataset = PointHistDataset(
