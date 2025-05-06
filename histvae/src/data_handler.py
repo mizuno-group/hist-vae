@@ -351,7 +351,7 @@ class DataHandler:
         self.config = config
 
 
-    def make_dataset(self, data, group, label=None, transform=False):
+    def make_dataset(self, data, group, label=None, max_vals=(), transform=False):
         """
         make dataset for training and testing
 
@@ -367,6 +367,7 @@ class DataHandler:
             data=data,
             group=group,
             label=label,
+            max_vals=max_vals,
             transform=transform,
             **ds_args
             )

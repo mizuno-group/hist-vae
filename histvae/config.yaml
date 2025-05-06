@@ -6,6 +6,7 @@ exp_name: null
 num_points: 2048
 in_channels: 1
 in_dims: 2
+max_vals: [10000, 10000]
 bins: 64
 num_workers: 4
 pin_memory: True
