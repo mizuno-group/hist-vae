@@ -201,7 +201,7 @@ class PointHistDataset(Dataset):
             group_idx = self.idx2group[i]
             selected_indices = np.where(self.group == group_idx)[0]
             pointcloud = self.data[selected_indices]
-            hist = self.calc_hist(pointcloud)
+            hist = self._calc_hist(pointcloud)
             hist = np.log1p(hist)
             tmp = np.max(hist) # store the max value for normalization
             self.log1p_max[group_idx] = tmp
@@ -228,17 +228,11 @@ class PointHistDataset(Dataset):
             idxs1 = np.random.choice(pointcloud.shape[0], self.num_points, replace=True)
             pointcloud1 = pointcloud[idxs1, :]
         # prepare histogram
-        hist0 = self.calc_hist(pointcloud0)
-        hist1 = self.calc_hist(pointcloud1)
+        hist0 = self._calc_hist(pointcloud0)
+        hist1 = self._calc_hist(pointcloud1)
         # normalize the histogram
-        hist0 = np.log1p(hist0) # log1p for numerical stability
-        tmp = np.max(hist0) # store the max value for normalization
-        self.log1p_max[idx] = tmp
-        hist0 = hist0 / tmp # normalize
-        hist1 = np.log1p(hist1) # log1p for numerical stability
-        hist1 = hist1 / np.max(hist1) # normalize
-        hist0 = torch.tensor(hist0, dtype=torch.float32)
-        hist1 = torch.tensor(hist1, dtype=torch.float32)
+        hist0 = self._normalize_hist(hist0, group_idx)
+        hist1 = self._normalize_hist(hist1, group_idx)
         # transform
         hist1 = self._transform_fxn(hist1) # hist1 only like translation
         # add channel dimension
@@ -255,7 +249,7 @@ class PointHistDataset(Dataset):
         # hist0, original; hist1, noisy
 
 
-    def calc_hist(self, data):
+    def _calc_hist(self, data):
         """
         Calculate the histogram of the data.
 
@@ -272,6 +266,17 @@ class PointHistDataset(Dataset):
         """
         hist = self.hist.compute(data)
         return hist
+
+
+    def _normalize_hist(self, hist, group_idx):
+        """
+        Normalize the histogram.
+        
+        """
+        hist = np.log1p(hist)
+        max_val = self.log1p_max[group_idx]
+        hist = hist / (max_val + 1e-6)
+        return torch.tensor(hist, dtype=torch.float32)
 
 
     def transform_on(self, **transform_params):
