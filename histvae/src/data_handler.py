@@ -186,16 +186,6 @@ class PointHistDataset(Dataset):
         # store normalization parameters
         # note: Dataset cannnot modify the data, so we need to store the normalization parameters
         self.log1p_max = dict()
-
-
-
-        print("DEBUG --- type =", type(self._calc_hist))
-        print("DEBUG --- is method? =", hasattr(self._calc_hist, "__self__"))
-        print("DEBUG --- func code obj =", getattr(self._calc_hist, '__code__', None))
-
-
-
-
         for i in range(self.num_data):
             group_idx = self.idx2group[i]
             selected_indices = np.where(self.group == group_idx)[0]
