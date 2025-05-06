@@ -68,6 +68,11 @@ class HistVAE:
         if test_transform is None:
             test_transform = False
         # dataset
+
+
+        print("DEBUG: train_dataset")
+
+
         self.train_dataset = self.data_handler.make_dataset(
             data=train_data, group=train_group, label=train_label, transform=train_transform
             )
