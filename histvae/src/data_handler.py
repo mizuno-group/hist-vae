@@ -217,8 +217,8 @@ class PointHistDataset(Dataset):
             idxs1 = np.random.choice(pointcloud.shape[0], self.num_points, replace=True)
             pointcloud1 = pointcloud[idxs1, :]
         # prepare histogram
-        hist0 = self.calc_hist(pointcloud0, bins=self.bins)
-        hist1 = self.calc_hist(pointcloud1, bins=self.bins)
+        hist0 = self.calc_hist(pointcloud0)
+        hist1 = self.calc_hist(pointcloud1)
         # normalize the histogram
         hist0 = np.log1p(hist0) # log1p for numerical stability
         tmp = np.max(hist0) # store the max value for normalization
