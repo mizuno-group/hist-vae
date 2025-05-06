@@ -359,24 +359,15 @@ class DataHandler:
         # prepare params
         ds_params = inspect.signature(PointHistDataset.__init__).parameters # diff
         ds_args = {k: self.config[k] for k in ds_params if k in self.config}
+        # integrate arguments
+        ds_args["data"] = data
+        ds_args["group"] = group
+        if label is not None:
+            ds_args["label"] = label
         if transform is not None:
             ds_args["transform"] = transform
-
-
-        print(">>>>>>>>>>>>>>>>>>>>")
-        print(ds_params)
-        print(">>>>>>>>>>>>>>>>>>>>")
-        print(ds_args)
-        print(">>>>>>>>>>>>>>>>>>>>")
-
         # create dataset
-        dataset = PointHistDataset(
-            data=data,
-            group=group,
-            label=label,
-            transform=transform,
-            **ds_args
-            )
+        dataset = PointHistDataset(**ds_args)
         return dataset
 
 
@@ -401,7 +392,10 @@ class DataHandler:
         # note: only child class PointHistDataLoader arguments are extracted
         dl_args = {k: self.config[k] for k in dl_params if k in self.config and k not in ["dataset", "shuffle"]}
         shuffle = True if mode == "train" else False
-        loader = PointHistDataLoader(dataset=dataset, shuffle=shuffle, **dl_args)
+        # integrate arguments
+        dl_args["dataset"] = dataset
+        dl_args["shuffle"] = shuffle
+        loader = PointHistDataLoader(**dl_args)
         return loader
     
 
