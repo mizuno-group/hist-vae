@@ -57,22 +57,28 @@ class HistVAE:
         tmp = [self.config["in_channels"]] + [self.config["bins"]] * (self.config["in_dims"])
         self.config["input_shape"] = tuple(tmp) # hard coded for ConvVAE
 
+        print("DEBUG: HistVAE")
+
+
 
     def prep_data(
             self, train_data=None, train_group=None, train_label=None, train_transform=None,
             test_data=None, test_group=None, test_label=None, test_transform=None
             ):
         """ prepare data """
-        if train_transform is None:
-            train_transform = self.config.get("transform", True)
-        if test_transform is None:
-            test_transform = False
-        # dataset
+
+
 
 
         print("DEBUG: train_dataset")
 
 
+
+        if train_transform is None:
+            train_transform = self.config.get("transform", True)
+        if test_transform is None:
+            test_transform = False
+        # dataset
         self.train_dataset = self.data_handler.make_dataset(
             data=train_data, group=train_group, label=train_label, transform=train_transform
             )
