@@ -351,7 +351,7 @@ class DataHandler:
         self.config = config
 
 
-    def make_dataset(self, data, group, label=None, max_vals=None, transform=False):
+    def make_dataset(self, data, group, label=None, transform=False):
         """
         make dataset for training and testing
 
@@ -363,8 +363,6 @@ class DataHandler:
         # prepare params
         ds_params = inspect.signature(PointHistDataset.__init__).parameters # diff
         ds_args = {k: self.config[k] for k in ds_params if k in self.config}
-        if max_vals is not None:
-            ds_args["max_vals"] = max_vals
         if transform is not None:
             ds_args["transform"] = transform
         # create dataset
