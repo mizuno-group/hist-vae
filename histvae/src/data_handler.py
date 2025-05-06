@@ -130,7 +130,7 @@ def plot_hist(hist_list, output="", **plot_params):
 class PointHistDataset(Dataset):
     def __init__(
             self, data, group, label=None, max_vals=(), transform=False,
-            num_points=768, bins=64, noise=None, **transform_params
+            num_points=768, bins=64, **transform_params
             ):
         """
         Parameters
@@ -155,9 +155,6 @@ class PointHistDataset(Dataset):
 
         num_points: int
             the number of points to be sampled
-
-        noise: float
-            the noise to be added to the histogram
         
         """
         super().__init__()
@@ -169,7 +166,6 @@ class PointHistDataset(Dataset):
         self.label = label
         self.bins = bins
         self.num_points = num_points
-        self.noise = noise or (1 / num_points)
         self.max_vals = max_vals
         # tie the group to the data
         self.unique_groups = np.unique(group)
@@ -280,7 +276,7 @@ class PointHistDataset(Dataset):
 
         """
         self.transform = False
-        self._transform_fxn = lambda x, y: (x, y)
+        self._transform_fxn = lambda x: x
 
 # ToDo test this
 class PCAugmentation:
@@ -365,6 +361,9 @@ class DataHandler:
         ds_args = {k: self.config[k] for k in ds_params if k in self.config}
         if transform is not None:
             ds_args["transform"] = transform
+
+        print(ds_args)
+
         # create dataset
         dataset = PointHistDataset(
             data=data,
