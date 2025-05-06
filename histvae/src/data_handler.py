@@ -190,7 +190,7 @@ class PointHistDataset(Dataset):
             group_idx = self.idx2group[i]
             selected_indices = np.where(self.group == group_idx)[0]
             pointcloud = self.data[selected_indices]
-            hist = self.calc_hist(pointcloud, bins=self.bins)
+            hist = self.calc_hist(pointcloud)
             hist = np.log1p(hist)
             tmp = np.max(hist) # store the max value for normalization
             self.log1p_max[group_idx] = tmp
