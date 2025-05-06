@@ -130,7 +130,7 @@ def plot_hist(hist_list, output="", **plot_params):
 class PointHistDataset(Dataset):
     def __init__(
             self, data, group, label=None, max_vals=(), transform=False,
-            num_points=768, bins=64, **transform_params
+            num_points=768, bins=64, transform_params=None
             ):
         """
         Parameters
@@ -174,7 +174,10 @@ class PointHistDataset(Dataset):
         self.num_data = len(self.unique_groups)
         self.transform = transform
         if transform:
-            trans = PCAugmentation(**transform_params)
+            if transform_params is not None:
+                trans = PCAugmentation(**transform_params)
+            else:
+                trans = PCAugmentation()
             self._transform_fxn = trans
         else:
             self._transform_fxn = lambda x: x
