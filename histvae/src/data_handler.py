@@ -189,9 +189,9 @@ class PointHistDataset(Dataset):
 
 
 
-        print("DEBUG --- type =", type(self.calc_hist))
-        print("DEBUG --- is method? =", hasattr(self.calc_hist, "__self__"))
-        print("DEBUG --- func code obj =", getattr(self.calc_hist, '__code__', None))
+        print("DEBUG --- type =", type(self._calc_hist))
+        print("DEBUG --- is method? =", hasattr(self._calc_hist, "__self__"))
+        print("DEBUG --- func code obj =", getattr(self._calc_hist, '__code__', None))
 
 
 
