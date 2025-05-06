@@ -17,20 +17,48 @@ from torch.utils.data import Dataset, DataLoader
 import torchvision.transforms.functional as TF
 
 # functions
-def calc_hist(X, bins=16):
-    try:
-        s = X.shape[1]
-    except IndexError:
-        s = 1
-    if s == 1:
-        hist, _ = np.histogram(X, bins=bins, density=False)
-    elif s == 2:
-        hist, _, _ = np.histogram2d(X[:, 0], X[:, 1], bins=bins, density=False)
-    elif s == 3:
-        hist, _ = np.histogramdd(X, bins=bins, density=False)
-    else:
-        raise ValueError("!! Input array must be 1D, 2D, or 3D. !!")
-    return hist
+class Histogram:
+    """
+    A class for efficiently computing k-dimensional histograms.
+    Especially optimized for repeated computations on datasets with fixed binning.
+    """
+
+    def __init__(self, max_vals, bins_per_dim):
+        """
+        Initialize histogram parameters.
+
+        Parameters:
+        -----------
+        max_vals : np.ndarray or list
+            Maximum values per dimension, shape (k,).
+        bins_per_dim : int or list
+            Number of bins per dimension. Either a single integer or a list of length k.
+        """
+        self.max_vals = np.asarray(max_vals)
+
+        if isinstance(bins_per_dim, int):
+            bins_per_dim = [bins_per_dim] * len(max_vals)
+
+        self.bins_per_dim = bins_per_dim
+        self.edges = [np.linspace(0, self.max_vals[dim], self.bins_per_dim[dim] + 1)
+                      for dim in range(len(max_vals))]
+
+    def compute(self, data):
+        """
+        Compute the k-dimensional histogram using precomputed bin edges.
+
+        Parameters:
+        -----------
+        data : np.ndarray
+            Array of shape (n_samples, k), representing k-dimensional data.
+
+        Returns:
+        --------
+        hist : np.ndarray
+            k-dimensional histogram array.
+        """
+        hist, _ = np.histogramdd(data, bins=self.edges)
+        return hist
 
 
 def plot_hist(hist_list, output="", **plot_params):
@@ -101,7 +129,7 @@ def plot_hist(hist_list, output="", **plot_params):
 
 class PointHistDataset(Dataset):
     def __init__(
-            self, data, group, label=None, transform=False,
+            self, data, group, label=None, max_vals=(), transform=False,
             num_points=768, bins=64, noise=None, **transform_params
             ):
         """
@@ -116,6 +144,9 @@ class PointHistDataset(Dataset):
         label: np.ndarray
             the label of the data
         
+        max_vals: tuple
+            the maximum values for each dimension of the data
+
         transform: bool
             whether to apply transform to the data
 
@@ -132,12 +163,14 @@ class PointHistDataset(Dataset):
         super().__init__()
         # check the input
         assert data.shape[0] == group.shape[0] == label.shape[0], "!! data, group, and label must have the same number of samples !!"
+        assert len(max_vals) == data.shape[1], "!! max_vals must have the same number of dimensions as data !!"
         self.data = data
         self.group = group
         self.label = label
         self.bins = bins
         self.num_points = num_points
         self.noise = noise or (1 / num_points)
+        self.max_vals = max_vals
         # tie the group to the data
         self.unique_groups = np.unique(group)
         self.idx2group = {i: j for i, j in enumerate(self.unique_groups)} # map index in the dataset to the group
@@ -149,8 +182,19 @@ class PointHistDataset(Dataset):
             self._transform_fxn = trans
         else:
             self._transform_fxn = lambda x: x
+        # prepare histogram
+        self.hist = Histogram(max_vals, bins)
         # store normalization parameters
+        # note: Dataset cannnot modify the data, so we need to store the normalization parameters
         self.log1p_max = dict()
+        for i in range(self.num_data):
+            group_idx = self.idx2group[i]
+            selected_indices = np.where(self.group == group_idx)[0]
+            pointcloud = self.data[selected_indices]
+            hist = self.calc_hist(pointcloud, bins=self.bins)
+            hist = np.log1p(hist)
+            tmp = np.max(hist) # store the max value for normalization
+            self.log1p_max[group_idx] = tmp
 
 
     def __len__(self):
@@ -174,8 +218,8 @@ class PointHistDataset(Dataset):
             idxs1 = np.random.choice(pointcloud.shape[0], self.num_points, replace=True)
             pointcloud1 = pointcloud[idxs1, :]
         # prepare histogram
-        hist0 = calc_hist(pointcloud0, bins=self.bins)
-        hist1 = calc_hist(pointcloud1, bins=self.bins)
+        hist0 = self.calc_hist(pointcloud0, bins=self.bins)
+        hist1 = self.calc_hist(pointcloud1, bins=self.bins)
         # normalize the histogram
         hist0 = np.log1p(hist0) # log1p for numerical stability
         tmp = np.max(hist0) # store the max value for normalization
@@ -199,7 +243,26 @@ class PointHistDataset(Dataset):
         # return the data
         return (hist0, hist1), label
         # hist0, original; hist1, noisy
-    
+
+
+    def calc_hist(self, data):
+        """
+        Calculate the histogram of the data.
+
+        Parameters
+        ----------
+        data: np.ndarray
+            the data to be used for training
+
+        Returns
+        -------
+        hist: np.ndarray
+            the histogram of the data
+
+        """
+        hist = self.hist.compute(data)
+        return hist
+
 
     def transform_on(self, **transform_params):
         """
