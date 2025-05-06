@@ -26,11 +26,6 @@ class HistVAE:
     def __init__(
             self, config: dict=None, outdir: str=None, exp_name: str=None, seed: int=42
             ):
-
-
-        print("DEBUG: INITIALIZE HistVAE")
-
-
         # arguments
         assert config is not None, "!! config must be given !!"
         self.config = config
@@ -62,23 +57,12 @@ class HistVAE:
         tmp = [self.config["in_channels"]] + [self.config["bins"]] * (self.config["in_dims"])
         self.config["input_shape"] = tuple(tmp) # hard coded for ConvVAE
 
-        print("DEBUG: HistVAE")
-
-
 
     def prep_data(
             self, train_data=None, train_group=None, train_label=None, train_transform=None,
             test_data=None, test_group=None, test_label=None, test_transform=None
             ):
         """ prepare data """
-
-
-
-
-        print("DEBUG: train_dataset")
-
-
-
         if train_transform is None:
             train_transform = self.config.get("transform", True)
         if test_transform is None:

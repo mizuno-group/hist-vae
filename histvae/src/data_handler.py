@@ -372,11 +372,6 @@ class DataHandler:
 
         """
         # check the input
-
-        print("DEBUG --- data.shape =", data.shape)
-
-
-
         assert data.shape[0] == group.shape[0], "!! data, group, and label must have the same number of samples !!"
         if label is not None:
             assert data.shape[0] == label.shape[0], "!! data, group, and label must have the same number of samples !!"
@@ -393,6 +388,11 @@ class DataHandler:
         if transform is not None:
             ds_args["transform"] = transform
         # create dataset
+
+
+        print("DEBUG --- ds_args =", ds_args)
+
+
         dataset = PointHistDataset(**ds_args)
         return dataset
 
