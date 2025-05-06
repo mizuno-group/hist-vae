@@ -186,6 +186,17 @@ class PointHistDataset(Dataset):
         # store normalization parameters
         # note: Dataset cannnot modify the data, so we need to store the normalization parameters
         self.log1p_max = dict()
+
+
+
+        print("DEBUG --- self.calc_hist =", self.calc_hist)
+        print("DEBUG --- type =", type(self.calc_hist))
+        print("DEBUG --- is method? =", hasattr(self.calc_hist, "__self__"))
+        print("DEBUG --- func code obj =", getattr(self.calc_hist, '__code__', None))
+
+
+
+
         for i in range(self.num_data):
             group_idx = self.idx2group[i]
             selected_indices = np.where(self.group == group_idx)[0]
@@ -363,8 +374,10 @@ class DataHandler:
         ds_params = inspect.signature(PointHistDataset.__init__).parameters # diff
         ds_args = {k: self.config[k] for k in ds_params if k in self.config}
         # integrate arguments
-        ds_args["data"] = data
-        ds_args["group"] = group
+        ds_args.update({
+            "data": data,
+            "group": group,
+        })
         if label is not None:
             ds_args["label"] = label
         if transform is not None:
