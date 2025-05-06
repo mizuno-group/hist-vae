@@ -351,7 +351,7 @@ class DataHandler:
         self.config = config
 
 
-    def make_dataset(self, data, group, label=None, max_vals=(), transform=False):
+    def make_dataset(self, data, group, label=None, max_vals=None, transform=False):
         """
         make dataset for training and testing
 
@@ -360,9 +360,14 @@ class DataHandler:
         assert data.shape[0] == group.shape[0], "!! data, group, and label must have the same number of samples !!"
         if label is not None:
             assert data.shape[0] == label.shape[0], "!! data, group, and label must have the same number of samples !!"
-        # create dataset
+        # prepare params
         ds_params = inspect.signature(PointHistDataset.__init__).parameters # diff
         ds_args = {k: self.config[k] for k in ds_params if k in self.config}
+        if max_vals is not None:
+            ds_args["max_vals"] = max_vals
+        if transform is not None:
+            ds_args["transform"] = transform
+        # create dataset
         dataset = PointHistDataset(
             data=data,
             group=group,
