@@ -17,20 +17,48 @@ from torch.utils.data import Dataset, DataLoader
 import torchvision.transforms.functional as TF
 
 # functions
-def calc_hist(X, bins=16):
-    try:
-        s = X.shape[1]
-    except IndexError:
-        s = 1
-    if s == 1:
-        hist, _ = np.histogram(X, bins=bins, density=False)
-    elif s == 2:
-        hist, _, _ = np.histogram2d(X[:, 0], X[:, 1], bins=bins, density=False)
-    elif s == 3:
-        hist, _ = np.histogramdd(X, bins=bins, density=False)
-    else:
-        raise ValueError("!! Input array must be 1D, 2D, or 3D. !!")
-    return hist
+class Histogram:
+    """
+    A class for efficiently computing k-dimensional histograms.
+    Especially optimized for repeated computations on datasets with fixed binning.
+    """
+
+    def __init__(self, max_vals, bins_per_dim):
+        """
+        Initialize histogram parameters.
+
+        Parameters:
+        -----------
+        max_vals : np.ndarray or list
+            Maximum values per dimension, shape (k,).
+        bins_per_dim : int or list
+            Number of bins per dimension. Either a single integer or a list of length k.
+        """
+        self.max_vals = np.asarray(max_vals)
+
+        if isinstance(bins_per_dim, int):
+            bins_per_dim = [bins_per_dim] * len(max_vals)
+
+        self.bins_per_dim = bins_per_dim
+        self.edges = [np.linspace(0, self.max_vals[dim], self.bins_per_dim[dim] + 1)
+                      for dim in range(len(max_vals))]
+
+    def compute(self, data):
+        """
+        Compute the k-dimensional histogram using precomputed bin edges.
+
+        Parameters:
+        -----------
+        data : np.ndarray
+            Array of shape (n_samples, k), representing k-dimensional data.
+
+        Returns:
+        --------
+        hist : np.ndarray
+            k-dimensional histogram array.
+        """
+        hist, _ = np.histogramdd(data, bins=self.edges)
+        return hist
 
 
 def plot_hist(hist_list, output="", **plot_params):
@@ -101,8 +129,8 @@ def plot_hist(hist_list, output="", **plot_params):
 
 class PointHistDataset(Dataset):
     def __init__(
-            self, data, group, label=None, transform=False,
-            num_points=768, bins=64, noise=None, **transform_params
+            self, data, group, label=None, max_vals=(), transform=False,
+            num_points=768, bins=64, transform_params=None
             ):
         """
         Parameters
@@ -116,6 +144,9 @@ class PointHistDataset(Dataset):
         label: np.ndarray
             the label of the data
         
+        max_vals: tuple
+            the maximum values for each dimension of the data
+
         transform: bool
             whether to apply transform to the data
 
@@ -124,20 +155,18 @@ class PointHistDataset(Dataset):
 
         num_points: int
             the number of points to be sampled
-
-        noise: float
-            the noise to be added to the histogram
         
         """
         super().__init__()
         # check the input
         assert data.shape[0] == group.shape[0] == label.shape[0], "!! data, group, and label must have the same number of samples !!"
+        assert len(max_vals) == data.shape[1], "!! max_vals must have the same number of dimensions as data !!"
         self.data = data
         self.group = group
         self.label = label
         self.bins = bins
         self.num_points = num_points
-        self.noise = noise or (1 / num_points)
+        self.max_vals = max_vals
         # tie the group to the data
         self.unique_groups = np.unique(group)
         self.idx2group = {i: j for i, j in enumerate(self.unique_groups)} # map index in the dataset to the group
@@ -145,12 +174,26 @@ class PointHistDataset(Dataset):
         self.num_data = len(self.unique_groups)
         self.transform = transform
         if transform:
-            trans = PCAugmentation(**transform_params)
+            if transform_params is not None:
+                trans = PCAugmentation(**transform_params)
+            else:
+                trans = PCAugmentation()
             self._transform_fxn = trans
         else:
             self._transform_fxn = lambda x: x
+        # prepare histogram
+        self.hist = Histogram(max_vals, bins)
         # store normalization parameters
+        # note: Dataset cannnot modify the data, so we need to store the normalization parameters
         self.log1p_max = dict()
+        for i in range(self.num_data):
+            group_idx = self.idx2group[i]
+            selected_indices = np.where(self.group == group_idx)[0]
+            pointcloud = self.data[selected_indices]
+            hist = self._calc_hist(pointcloud)
+            hist = np.log1p(hist)
+            tmp = np.max(hist) # store the max value for normalization
+            self.log1p_max[group_idx] = tmp
 
 
     def __len__(self):
@@ -174,17 +217,11 @@ class PointHistDataset(Dataset):
             idxs1 = np.random.choice(pointcloud.shape[0], self.num_points, replace=True)
             pointcloud1 = pointcloud[idxs1, :]
         # prepare histogram
-        hist0 = calc_hist(pointcloud0, bins=self.bins)
-        hist1 = calc_hist(pointcloud1, bins=self.bins)
+        hist0 = self._calc_hist(pointcloud0)
+        hist1 = self._calc_hist(pointcloud1)
         # normalize the histogram
-        hist0 = np.log1p(hist0) # log1p for numerical stability
-        tmp = np.max(hist0) # store the max value for normalization
-        self.log1p_max[idx] = tmp
-        hist0 = hist0 / tmp # normalize
-        hist1 = np.log1p(hist1) # log1p for numerical stability
-        hist1 = hist1 / np.max(hist1) # normalize
-        hist0 = torch.tensor(hist0, dtype=torch.float32)
-        hist1 = torch.tensor(hist1, dtype=torch.float32)
+        hist0 = self._normalize_hist(hist0, group_idx)
+        hist1 = self._normalize_hist(hist1, group_idx)
         # transform
         hist1 = self._transform_fxn(hist1) # hist1 only like translation
         # add channel dimension
@@ -199,7 +236,37 @@ class PointHistDataset(Dataset):
         # return the data
         return (hist0, hist1), label
         # hist0, original; hist1, noisy
-    
+
+
+    def _calc_hist(self, data):
+        """
+        Calculate the histogram of the data.
+
+        Parameters
+        ----------
+        data: np.ndarray
+            the data to be used for training
+
+        Returns
+        -------
+        hist: np.ndarray
+            the histogram of the data
+
+        """
+        hist = self.hist.compute(data)
+        return hist
+
+
+    def _normalize_hist(self, hist, group_idx):
+        """
+        Normalize the histogram.
+        
+        """
+        hist = np.log1p(hist)
+        max_val = self.log1p_max[group_idx]
+        hist = hist / (max_val + 1e-6)
+        return torch.tensor(hist, dtype=torch.float32)
+
 
     def transform_on(self, **transform_params):
         """
@@ -297,16 +364,20 @@ class DataHandler:
         assert data.shape[0] == group.shape[0], "!! data, group, and label must have the same number of samples !!"
         if label is not None:
             assert data.shape[0] == label.shape[0], "!! data, group, and label must have the same number of samples !!"
-        # create dataset
+        # prepare params
         ds_params = inspect.signature(PointHistDataset.__init__).parameters # diff
         ds_args = {k: self.config[k] for k in ds_params if k in self.config}
-        dataset = PointHistDataset(
-            data=data,
-            group=group,
-            label=label,
-            transform=transform,
-            **ds_args
-            )
+        # integrate arguments
+        ds_args.update({
+            "data": data,
+            "group": group,
+        })
+        if label is not None:
+            ds_args["label"] = label
+        if transform is not None:
+            ds_args["transform"] = transform
+        # create dataset
+        dataset = PointHistDataset(**ds_args)
         return dataset
 
 
@@ -331,7 +402,10 @@ class DataHandler:
         # note: only child class PointHistDataLoader arguments are extracted
         dl_args = {k: self.config[k] for k in dl_params if k in self.config and k not in ["dataset", "shuffle"]}
         shuffle = True if mode == "train" else False
-        loader = PointHistDataLoader(dataset=dataset, shuffle=shuffle, **dl_args)
+        # integrate arguments
+        dl_args["dataset"] = dataset
+        dl_args["shuffle"] = shuffle
+        loader = PointHistDataLoader(**dl_args)
         return loader
     
 
