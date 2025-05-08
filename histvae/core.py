@@ -162,14 +162,13 @@ class HistVAE:
             for data, label in data_loader:
                 hist0, hist1 = (x.to(self.device) for x in data)
                 label = label.to(self.device)
-                logits, recon, mu, logvar = self.finetuned_model(hist0) # use original hist
+                logits, recon, mu, logvar = self.model(hist0) # use original hist
                 preds.append(logits.argmax(dim=1).cpu().numpy())
                 probs.append(logits.cpu().numpy())
                 labels.append(label.cpu().numpy())
         return np.concatenate(preds), np.concatenate(probs), np.concatenate(labels)
 
 
-    # ToDo: check this
     def get_latent(self, dataset=None, indices:list=[]):
         """
         get latent representation
@@ -196,7 +195,6 @@ class HistVAE:
         return np.vstack(reps)
 
 
-    # ToDo: check this
     def check_data(self, dataset, indices:list=[], output:str="", **plot_params):
         """
         check data
