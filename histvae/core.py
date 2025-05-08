@@ -298,6 +298,7 @@ class Preprocess:
         self.label = None
 
 
+    # ToDo: check this
     def fit_transform(self, df):
         """
         preprocess the data
