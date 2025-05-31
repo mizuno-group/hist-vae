@@ -237,7 +237,6 @@ class PointHistDataset(Dataset):
         group_idx = self.idx2group[idx]
         selected_indices = np.where(self.group == group_idx)[0]
         pointcloud = self.data[selected_indices]
-
         # limit the number of points if necessary (random sampling)
         if pointcloud.shape[0] > self.num_points:
             idxs0 = np.random.choice(pointcloud.shape[0], self.num_points, replace=False)
@@ -250,9 +249,28 @@ class PointHistDataset(Dataset):
             idxs1 = np.random.choice(pointcloud.shape[0], self.num_points, replace=True)
             pointcloud1 = pointcloud[idxs1, :]
 
+        import matplotlib.pyplot as plt
+        # debug: plot the pointclouds
+        plt.figure(figsize=(10, 5))
+        plt.subplot(1, 2, 1)
+        plt.scatter(pointcloud0[:, 0], pointcloud0[:, 1], s=1, c='blue', label='Original')
+        plt.title('Original Point Cloud')
+        plt.subplot(1, 2, 2)
+        plt.scatter(pointcloud1[:, 0], pointcloud1[:, 1], s=1, c='red', label='Noisy')
+        plt.title('Noisy Point Cloud')
+        plt.suptitle(f'Group: {group_idx}, Points: {pointcloud.shape[0]}')
+        plt.show();
+
         # prepare histogram
         hist0 = self._calc_hist(pointcloud0)
         hist1 = self._calc_hist(pointcloud1)
+
+        # debug: plot the histograms
+        plot_hist([hist0, hist1], title_list=[f'Group {group_idx} - Original', f'Group {group_idx} - Noisy'],
+                    xlabel='Bins', ylabel='Counts', cmap='viridis', aspect='auto')
+
+
+
         # normalize the histogram
         hist0 = self._normalize_hist(hist0, group_idx)
         hist1 = self._normalize_hist(hist1, group_idx)
