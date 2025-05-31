@@ -64,12 +64,11 @@ class Histogram:
         return hist
 
     def _hist_2d(self, data):
-        # Ensuring scatter consistency: (y, x) ordering
         hist, _, _ = np.histogram2d(
-            data[:, 1], data[:, 0],
+            data[:, 0], data[:, 1],
             bins=[self.edges[1], self.edges[0]]
         )
-        return hist[::-1, :]
+        return hist
 
     def _hist_nd(self, data):
         hist, _ = np.histogramdd(data, bins=self.edges)
@@ -259,7 +258,7 @@ class PointHistDataset(Dataset):
         plt.scatter(pointcloud1[:, 0], pointcloud1[:, 1], s=1, c='red', label='Noisy')
         plt.title('Noisy Point Cloud')
         plt.suptitle(f'Group: {group_idx}, Points: {pointcloud.shape[0]}')
-        plt.show();
+        plt.show()
 
         # prepare histogram
         hist0 = self._calc_hist(pointcloud0)
@@ -268,7 +267,6 @@ class PointHistDataset(Dataset):
         # debug: plot the histograms
         plot_hist([hist0, hist1], title_list=[f'Group {group_idx} - Original', f'Group {group_idx} - Noisy'],
                     xlabel='Bins', ylabel='Counts', cmap='viridis', aspect='auto')
-
 
 
         # normalize the histogram
