@@ -222,8 +222,6 @@ class PointHistDataset(Dataset):
         # normalize the histogram
         hist0 = torch.tensor(hist0, dtype=torch.float32)
         hist1 = torch.tensor(hist1, dtype=torch.float32)
-        # hist0 = self._normalize_hist(hist0, group_idx)
-        # hist1 = self._normalize_hist(hist1, group_idx)
         # transform
         hist1 = self._transform_fxn(hist1) # hist1 only like translation
         # add channel dimension
