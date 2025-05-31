@@ -19,46 +19,77 @@ import torchvision.transforms.functional as TF
 # functions
 class Histogram:
     """
-    A class for efficiently computing k-dimensional histograms.
-    Especially optimized for repeated computations on datasets with fixed binning.
+    A class optimized to compute histograms efficiently without repeated dimension checks.
     """
 
-    def __init__(self, max_vals, bins_per_dim):
+    def __init__(self, dimension, max_vals, bins_per_dim):
         """
-        Initialize histogram parameters.
+        Initialize the Histogram object with the optimal histogram function based on dimension.
 
         Parameters:
         -----------
-        max_vals : np.ndarray or list
-            Maximum values per dimension, shape (k,).
+        dimension : int
+            The dimension of the input data (1, 2, or >=3).
+
+        max_vals : list or np.ndarray
+            Maximum values for each dimension.
+
         bins_per_dim : int or list
-            Number of bins per dimension. Either a single integer or a list of length k.
+            Number of bins for each dimension.
         """
+        self.dimension = dimension
         self.max_vals = np.asarray(max_vals)
 
         if isinstance(bins_per_dim, int):
-            bins_per_dim = [bins_per_dim] * len(max_vals)
+            bins_per_dim = [bins_per_dim] * dimension
 
         self.bins_per_dim = bins_per_dim
-        self.edges = [np.linspace(0, self.max_vals[dim], self.bins_per_dim[dim] + 1)
-                      for dim in range(len(max_vals))]
+
+        # Precompute bin edges based on dimensions
+        self.edges = [
+            np.linspace(0, self.max_vals[dim], self.bins_per_dim[dim] + 1)
+            for dim in range(dimension)
+        ]
+
+        # Pre-select histogram function based on dimension
+        if self.dimension == 1:
+            self.hist_func = self._hist_1d
+        elif self.dimension == 2:
+            self.hist_func = self._hist_2d
+        else:
+            self.hist_func = self._hist_nd
+
+    def _hist_1d(self, data):
+        hist, _ = np.histogram(data, bins=self.edges[0])
+        return hist
+
+    def _hist_2d(self, data):
+        # Ensuring scatter consistency: (y, x) ordering
+        hist, _, _ = np.histogram2d(
+            data[:, 1], data[:, 0],
+            bins=[self.edges[1], self.edges[0]]
+        )
+        return hist[::-1, :]
+
+    def _hist_nd(self, data):
+        hist, _ = np.histogramdd(data, bins=self.edges)
+        return hist
 
     def compute(self, data):
         """
-        Compute the k-dimensional histogram using precomputed bin edges.
+        Compute histogram using the pre-selected histogram function.
 
         Parameters:
         -----------
         data : np.ndarray
-            Array of shape (n_samples, k), representing k-dimensional data.
+            Data array of shape (n_samples, dimension).
 
         Returns:
         --------
         hist : np.ndarray
-            k-dimensional histogram array.
+            Computed histogram.
         """
-        hist, _ = np.histogramdd(data, bins=self.edges)
-        return hist
+        return self.hist_func(data)
 
 
 def plot_hist(hist_list, output="", **plot_params):
@@ -166,6 +197,7 @@ class PointHistDataset(Dataset):
         self.label = label
         self.bins = bins
         self.num_points = num_points
+        self.ndim = data.shape[1]
         self.max_vals = max_vals
         # tie the group to the data
         self.unique_groups = np.unique(group)
@@ -182,7 +214,7 @@ class PointHistDataset(Dataset):
         else:
             self._transform_fxn = lambda x: x
         # prepare histogram
-        self.hist = Histogram(max_vals, bins)
+        self.hist = Histogram(self.ndim, max_vals, bins)
         # store normalization parameters
         # note: Dataset cannnot modify the data, so we need to store the normalization parameters
         self.log1p_max = dict()
@@ -210,12 +242,6 @@ class PointHistDataset(Dataset):
         group_idx = self.idx2group[idx]
         selected_indices = np.where(self.group == group_idx)[0]
         pointcloud = self.data[selected_indices]
-
-
-        plt.figure(figsize=(10, 5))
-        plt.scatter(pointcloud[:, 0], pointcloud[:, 1], s=1)
-        plt.show()
-
 
         # limit the number of points if necessary (random sampling)
         if pointcloud.shape[0] > self.num_points:
