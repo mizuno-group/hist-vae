@@ -220,6 +220,8 @@ class PointHistDataset(Dataset):
         hist0 = self._calc_hist(pointcloud0)
         hist1 = self._calc_hist(pointcloud1)
         # normalize the histogram
+        hist0 = torch.tensor(hist0, dtype=torch.float32)
+        hist1 = torch.tensor(hist1, dtype=torch.float32)
         # hist0 = self._normalize_hist(hist0, group_idx)
         # hist1 = self._normalize_hist(hist1, group_idx)
         # transform
