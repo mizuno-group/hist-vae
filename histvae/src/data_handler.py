@@ -201,10 +201,22 @@ class PointHistDataset(Dataset):
 
 
     def __getitem__(self, idx):
+
+
+        import matplotlib.pyplot as plt
+
+
         # get the indicated data
         group_idx = self.idx2group[idx]
         selected_indices = np.where(self.group == group_idx)[0]
         pointcloud = self.data[selected_indices]
+
+
+        plt.figure(figsize=(10, 5))
+        plt.scatter(pointcloud[:, 0], pointcloud[:, 1], s=1)
+        plt.show()
+
+
         # limit the number of points if necessary (random sampling)
         if pointcloud.shape[0] > self.num_points:
             idxs0 = np.random.choice(pointcloud.shape[0], self.num_points, replace=False)
@@ -216,9 +228,24 @@ class PointHistDataset(Dataset):
             pointcloud0 = pointcloud[idxs0, :]
             idxs1 = np.random.choice(pointcloud.shape[0], self.num_points, replace=True)
             pointcloud1 = pointcloud[idxs1, :]
+
+        plt.figure(figsize=(10, 5))
+        plt.scatter(pointcloud[:, 0], pointcloud[:, 1], s=1)
+        plt.show()
+
+
+
         # prepare histogram
         hist0 = self._calc_hist(pointcloud0)
         hist1 = self._calc_hist(pointcloud1)
+
+
+        plt.figure(figsize=(10, 5))
+        plt.imshow(hist0.T, origin='lower', cmap='viridis', aspect='equal')
+        plt.show()
+
+
+
         # normalize the histogram
         hist0 = torch.tensor(hist0, dtype=torch.float32)
         hist1 = torch.tensor(hist1, dtype=torch.float32)
