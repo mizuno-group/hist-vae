@@ -321,22 +321,32 @@ class Preprocess:
 
         """
         # prepare meta data and converter
-        # group and label are assumed to be 1D
+        # group and label are assumed to be 1DS
+        # label is converted to integer
         if self.key_label is None:
             group = df[self.key_group].values
             unique_group = np.unique(group)
             self.lut = pd.DataFrame(
                 {"raw_index":list(range(len(unique_group))), "group": unique_group}
                 )
-            self.lut[:, "label"] = None
+            self.lut.loc[:, "label0"] = None
+            self.lut.loc[:, "label"] = None
             converted_label = None
         else:
-            tmp = dict(zip(list(df[self.key_group]), list(df[self.key_label])))
+            # convert label to integer
+            label0 = list(df[self.key_label].unique())
+            label1 = list(range(len(label0)))
+            label_encoder = dict(zip(label0, label1))
+            converted_label = np.array([label_encoder[k] for k in list(df[self.key_label])])
+            # store lookup table
+            group2label = dict(zip(list(df[self.key_group]), list(df[self.key_label])))
             self.lut = pd.DataFrame(
-                {"raw_index":list(range(len(tmp))), "group": list(tmp.keys()), "label": list(tmp.values())}
+                {
+                    "raw_index":list(range(len(group2label))),
+                    "group": list(group2label.keys()),
+                    "label0": list(group2label.values())}
                 )
-            dic_label = dict(zip(list(self.lut["label"]), list(self.lut["raw_index"])))
-            converted_label = np.array([dic_label[k] for k in list(df[self.key_label])])
+            self.lut["label"] = self.lut["label0"].map(label_encoder)
         dic_group = dict(zip(list(self.lut["group"]), list(self.lut["raw_index"])))
         converted_group = np.array([dic_group[k] for k in list(df[self.key_group])])
         self.num_data = self.lut.shape[0] # number of data
