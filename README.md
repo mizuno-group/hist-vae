@@ -5,6 +5,9 @@ a package for extracting point cloud and histogram based representations with VA
 This repository is under construction and will be officially released by [Mizuno group](https://github.com/mizuno-group).  
 Please contact tadahaya[at]gmail.com before publishing your paper using the contents of this repository.  
 
+# History
+dev-route0 contains remnants of PointsEncoder, which are retained for future development.  
+
 ## Organization
 ------------  
 
