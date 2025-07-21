@@ -3,9 +3,7 @@
 Created on Tue Jul 23 12:09:08 2019
 
 core module
-
-note 250320
-- which is better to use: self.model or self.pretrained/self.finetuned?
+a class specific to the model
 
 @author: tadahaya
 """
@@ -16,134 +14,140 @@ from schedulefree import RAdamScheduleFree
 import numpy as np
 import pandas as pd
 import os, yaml
-import inspect
+from matplotlib import pyplot as plt
 from datetime import datetime
 
-from .src.barlow import BarlowTwins, LinearHead
-from .src.trainer import PreTrainer, Trainer
-from .src.data_handler import PointHistDataset, prep_dataloader, plot_hist
+from .src.models import ModelHandler
+from .src.trainer import PreTrainer, FineTuner
+from .src.data_handler import DataHandler, plot_hist
 from .src.utils import fix_seed
 
-class PHTwins:
-    """ class for training and prediction """
+class HistVAE:
     def __init__(
-            self, config_path: str, df: pd.DataFrame=None, test_df:pd.DataFrame=None,
-            outdir: str=None, exp_name: str=None, seed: int=42
+            self, config: dict=None, outdir: str=None, exp_name: str=None, seed: int=42
             ):
         # arguments
-        assert outdir is not None, "!! Give outdir !!"
-        self.df = df # DataFrame containing the point data and label
-        self.test_df = test_df # DataFrame containing the point data and label
+        assert config is not None, "!! config must be given !!"
+        self.config = config
+        self.outdir = outdir
+        self.exp_name = exp_name
+        self.seed = seed
+        # delegate
+        self.data_handler = DataHandler(config)
+        self.model_handler = ModelHandler(config)
+        # initialize
         self.train_dataset = None
         self.test_dataset = None
-        with open(config_path, "r") as f:
-            self.config = yaml.safe_load(f)
-        self.device = self.config.get("device", "cuda" if torch.cuda.is_available() else "cpu")
-        self.config_path = config_path
-        if exp_name is None:
-            exp_name = f"exp-{datetime.today().strftime('%y%m%d')}"
-        self.config["exp_name"] = exp_name            
-        self.outdir = outdir
-        # initialize
-        self.pretrained_model = None
-        self.finetuned_model = None
-        self.pretrainer = None
+        self.train_loader = None
+        self.test_loader = None
+        self.train_lut = None
+        self.test_lut = None
+        self.model = None
         self.trainer = None
-        self.optimizer = {"pretraining": None, "finetuning": None}
+        self.optimizer = None
+        self.loss_fn = None
         # fix seed
         g, seed_worker = fix_seed(seed, fix_cuda=True)
-        self._seed = {"seed": seed, "g": g, "seed_worker": seed_worker}
-        # prepare model
-        self.init_model()
+        self._seed = {"seed": seed, "generator": g, "worker_init_fn": seed_worker}
+        # loading
+        self.device = self.config.get("device", "cuda" if torch.cuda.is_available() else "cpu")
+        if exp_name is None:
+            exp_name = f"exp-{datetime.today().strftime('%y%m%d')}"
+        self.config["exp_name"] = exp_name
+        tmp = [self.config["in_channels"]] + [self.config["bins"]] * (self.config["in_dims"])
+        self.config["input_shape"] = tuple(tmp) # hard coded for ConvVAE
 
 
-    def init_model(self):
+    def prep_data(
+            self, train_data=None, train_group=None, train_label=None, train_transform=None,
+            test_data=None, test_group=None, test_label=None, test_transform=None
+            ):
+        """ prepare data """
+        if train_transform is None:
+            train_transform = self.config.get("transform", True)
+        if test_transform is None:
+            test_transform = False
+        # dataset
+        self.train_dataset = self.data_handler.make_dataset(
+            data=train_data, group=train_group, label=train_label, transform=train_transform
+            )
+        if test_data is not None:
+            self.test_dataset = self.data_handler.make_dataset(
+                data=test_data, group=test_group, label=test_label, transform=test_transform
+                )
+        # dataloader
+        self.train_loader = self.data_handler.make_dataloader(dataset=self.train_dataset, mode="train")
+        if self.test_dataset is not None:
+            self.test_loader = self.data_handler.make_dataloader(dataset=self.test_dataset, mode="test")
+        # lookup table
+        self.train_lut = self.data_handler.make_lut(dataset=self.train_dataset)
+        self.test_lut = None
+        if self.test_dataset is not None:
+            self.test_lut = self.data_handler.make_lut(dataset=self.test_dataset)
+
+
+    def prep_model(self, mode="pretrain", model_path:str=None):
         """
         prepare model
         hard coded parameters
+
+        Parameters
+        ----------
+        mode: str
+            "pretrain", "cpt", or "finetune"
+
+        model_path: str
+            path to the pretrained model
+            only used in "cpt" and "finetune"
         
         """
-        # prepare pretraining model
-        self.pretrained_model = BarlowTwins(
-            input_dim=self.config["hist_dim"], # the dimension of the input
-            hidden_hist=self.config["hidden_hist"], # the dimension of the hidden layer
-            dropout_hist=self.config["dropout_hist"], # the dropout rate
-            num_blocks=self.config["num_blocks"], # the number of blocks in the ResNet
-            latent_dim=self.config["latent_dim"], # the dimension of the latent representation
-            hidden_proj=self.config["hidden_proj"], # the dimension of the hidden layer
-            output_proj=self.config["output_proj"], # the dimension of the output layer
-            num_proj=self.config["num_proj"], # the number of the projection MLPs
-            lambd=self.config["lambd"], # tradeoff parameter
-            scale_factor=self.config["scale_factor"] # factor to scale the loss by
-        )
-        for param in self.pretrained_model.parameters():
-            param.requires_grad = True
-        optimizer0 = RAdamScheduleFree(self.pretrained_model.parameters(), lr=float(self.config["lr"]), betas=(0.9, 0.999))
-        self.pretrainer = PreTrainer(
-            self.config, self.pretrained_model, optimizer0, outdir=self.outdir
-            )
-        self.optimizer["pretraining"] = optimizer0
-        # prepare linear head
-        self.finetuned_model = LinearHead(
-            self.pretrained_model, # the pre-trained model
-            self.config["latent_dim"], # the dimension of the latent representation
-            self.config["num_classes"], # the number of classes
-            self.config["num_layers"], # the number of layers in the MLP
-            self.config["hidden_head"], # the number of hidden units in the MLP
-            self.config["dropout_head"], # the dropout rate
-            self.config["frozen"] # whether the pretrained model is frozen
-        )
-        for param in self.finetuned_model.parameters():
-            param.requires_grad = True
-        optimizer1 = RAdamScheduleFree(self.finetuned_model.parameters(), lr=float(self.config["lr"]), betas=(0.9, 0.999))
-        loss_fn = nn.CrossEntropyLoss() # hard coded
-        self.trainer = Trainer(
-            self.config, self.finetuned_model, optimizer1, loss_fn, outdir=self.outdir
-            )
-        self.optimizer["finetuning"] = optimizer1
-
-
-    def prep_data(self, key_identify:str, key_data:list, key_label:str):
-        """ prepare data """
-        self.train_dataset = PointHistDataset(
-            self.df, key_identify, key_data, key_label, self.config["num_points"], self.config["bins"]
-        )
-        train_loader = prep_dataloader(
-            self.train_dataset, self.config["batch_size"], True, self.config["num_workers"],
-            self.config["pin_memory"], self._seed["g"], self._seed["seed_worker"]
-            )
-        if self.test_df is None:
-            return train_loader, None
-        else:
-            self.test_dataset = PointHistDataset(
-                self.test_df, key_identify, key_data, key_label, self.config["num_points"], self.config["bins"]
-            )
-            test_loader = prep_dataloader(
-                self.test_dataset, self.config["batch_size"], False, self.config["num_workers"],
-                self.config["pin_memory"], self._seed["g"], self._seed["seed_worker"]
+        # check the mode
+        assert mode in ["pretrain", "cpt", "finetune"], "!! mode must be pretrain, cpt, or finetune !!"
+        if mode == "pretrain":
+            # prepare pretraining model
+            self.model = self.model_handler.make_pretrain()
+            self.optimizer = RAdamScheduleFree(
+                self.model.parameters(), lr=float(self.config["lr"]), betas=(0.9, 0.999),
+                weight_decay=float(self.config["weight_decay"])
                 )
-            return train_loader, test_loader
+            self.trainer = PreTrainer(
+                self.config, self.model, self.optimizer, outdir=self.outdir
+                )
+        elif mode == "cpt":
+            # prepare continuous pretraining model
+            assert model_path is not None, "!! model_path must be given in cpt mode!!"
+            self.model = self.model_handler.make_cpt(model_path=model_path)
+            self.optimizer = RAdamScheduleFree(
+                self.model.parameters(), lr=float(self.config["lr"]), betas=(0.9, 0.999),
+                weight_decay=float(self.config["weight_decay"])
+                )
+            self.trainer = PreTrainer(
+                self.config, self.model, self.optimizer, outdir=self.outdir
+                )
+        elif mode == "finetune":
+            # prepare finetuning model
+            assert model_path is not None, "!! model_path must be given in finetune mode!!"
+            self.model = self.model_handler.make_finetune(model_path=model_path)
+            self.optimizer = RAdamScheduleFree(
+                self.model.parameters(), lr=float(self.config["lr"]), betas=(0.9, 0.999),
+                weight_decay=float(self.config["weight_decay"])
+                )
+            self.loss_fn = nn.CrossEntropyLoss()
+            self.trainer = FineTuner(
+                self.config, self.model, self.optimizer, self.loss_fn, outdir=self.outdir
+                )
 
 
-    def pretrain(self, train_loader, test_loader, callbacks:list=None, verbose:bool=True):
-        """ pretraining """
-        if callbacks is not None:
-            self.pretrainer.set_callbacks(callbacks)
-        self.pretrainer.train(train_loader, test_loader)
-        if verbose:
-            print(">> Pretraining is done.")
-
-
-    def finetune(self, train_loader, test_loader, callbacks:list=None, verbose:bool=True):
-        """ finetuning """
+    def train(self, callbacks:list=None, verbose:bool=True):
+        """ training """
         if callbacks is not None:
             self.trainer.set_callbacks(callbacks)
-        self.trainer.train(train_loader, test_loader)
+        self.trainer.train(self.train_loader, self.test_loader)
         if verbose:
-            print(">> Finetuning is done.")
+            print(">> Training is done.")
 
 
-    # ToDo: implement this
+    # ToDo: check this
     def predict(self, data_loader=None):
         """ prediction """
         if data_loader is None:
@@ -153,26 +157,30 @@ class PHTwins:
         self.finetuned_model.eval()
         preds = []
         probs = []
+        labels = []
         with torch.no_grad():
-            for data, _ in data_loader:
-                data = data.to(self.device)
-                output = self.model(data)[0] # ToDo: check this
-                preds.append(output.argmax(dim=1).cpu().numpy())
-                probs.append(output.cpu().numpy())
-        return np.concatenate(preds), np.concatenate(probs)
+            for data, label in data_loader:
+                hist0, hist1 = (x.to(self.device) for x in data)
+                label = label.to(self.device)
+                logits, recon, mu, logvar = self.model(hist0) # use original hist
+                preds.append(logits.argmax(dim=1).cpu().numpy())
+                probs.append(logits.cpu().numpy())
+                labels.append(label.cpu().numpy())
+        return np.concatenate(preds), np.concatenate(probs), np.concatenate(labels)
 
 
-    def get_representation(self, dataset=None, indices:list=[]):
+    def get_latent(self, dataset=None, indices:list=[]):
         """
-        get representation
+        get latent representation
         note: pretrained model weight is changed after finetuning.
         
         """
         if dataset is None:
-            dataset = self.train_dataset
-        if self.pretrained_model is None:
+            dataset = self.test_dataset
+        if self.model is None:
             raise ValueError("!! fit or load_model first !!")
-        self.pretrained_model.eval()
+        self.model.eval()
+        dataset.transform_off() # disable transform
         num_data = len(dataset)
         if len(indices) == 0:
             indices = list(range(num_data))
@@ -181,9 +189,9 @@ class PHTwins:
             for i in indices:
                 data, _ = dataset[i]
                 hist0, hist1 = (x.to(self.device).unsqueeze(0) for x in data)  # add batch dimension
-                (z1, z2), _ = self.pretrained_model(hist0, hist1)
-                output = (z1 + z2) / 2  # average two features
-                reps.append(output.cpu().numpy().reshape(1, -1))  # del batch dimension
+                mu, logvar = self.model.encode(hist0) # use original hist
+                # note both ConvVAE and LinearHead have encode method
+                reps.append(mu.cpu().numpy().reshape(1, -1))  # del batch dimension
         return np.vstack(reps)
 
 
@@ -195,10 +203,13 @@ class PHTwins:
         ----------
         dataset: torch.utils.data.Dataset
             the PHTwins dataset
+
         indices: list
             the list of indices to be checked
+
         output: str
             the output path
+
         plot_params: dict
             the parameters for the plot
             default_params = {
@@ -214,10 +225,13 @@ class PHTwins:
             }
         
         """
-        hist_list = [dataset[i][0][0].numpy()[0] for i in indices] # ((hist, hist), label)
+        # restore original histogram
+        hist_list = [dataset[i][0][0].numpy()[0] * dataset.log1p_max[i] for i in indices] # ((hist, hist), label)
+        hist_list = [np.exp(h) - 1 for h in hist_list]
         plot_hist(hist_list, output, **plot_params)
 
 
+    # ToDo: check this
     def qual_eval(self, dataset, query_indices, outdir:str=""):
         """
         qualitative evaluation
@@ -232,7 +246,7 @@ class PHTwins:
         
         """
         # get representations
-        reps = self.get_representation(dataset) # default: train dataset
+        reps = self.get_latent(dataset) # default: train dataset
         # query data
         query_reps = reps[query_indices]
         # calculate cosine similarity
@@ -256,42 +270,299 @@ class PHTwins:
         return sim_matrix
 
 
-    def load_pretrained(self, model_path: str, config_path: str=None):
-        """ load pretrained model """
-        if config_path is not None:
-            with open(config_path, "r") as f:
-                self.config = yaml.safe_load(f)
-        # initialize BarlowTwins model
-        model_params = inspect.signature(BarlowTwins.__init__).parameters
-        model_args = {k: self.config[k] for k in model_params if k in self.config}
-        model_args["input_dim"] = self.config["hist_dim"] # hard coded
-        self.pretrained_model = BarlowTwins(**model_args)
-        # load model
-        checkpoint = torch.load(model_path)
-        if "model" in checkpoint:
-            self.pretrained_model.load_state_dict(checkpoint["model"])
-        if "optimizer" in checkpoint:
-            self.optimizer["pretraining"].load_state_dict(checkpoint["optimizer"])
+class Preprocess:
+    def __init__(
+            self, key_data, key_group, key_label=None
+            ):
+        """
+        Parameters
+        ----------
+        key_data: list
+            the keys for the data
+
+        key_group: str
+            the key to identify the data
+
+        key_label: int
+            the key for the label
+            note that the label should be integer
+        
+        """
+        self.key_data = key_data
+        self.key_group = key_group
+        self.key_label = key_label
+        self.lut = None
+        self.num_data = None
+        self.data = None
+        self.group = None
+        self.label = None
 
 
-    def load_finetuned(self, model_path: str, config_path: str=None):
-        """ load model with linear head """
-        if config_path is not None:
-            with open(config_path, "r") as f:
-                self.config = yaml.safe_load(f)
-        # initialize BarlowTwins model
-        bt_params = inspect.signature(BarlowTwins.__init__).parameters
-        bt_args = {k: self.config[k] for k in bt_params if k in self.config}
-        bt_args["input_dim"] = self.config["hist_dim"] # hard coded
-        init_bt_model = BarlowTwins(**bt_args)
-        # initialize LinearHead model
-        lh_params = inspect.signature(LinearHead.__init__).parameters
-        lh_args = {k: self.config[k] for k in lh_params if k in self.config}
-        lh_args["pretrained"] = init_bt_model # hard coded
-        self.finetuned_model = LinearHead(**lh_args)
-        # load model
-        checkpoint = torch.load(model_path)
-        if "model" in checkpoint:
-            self.finetuned_model.load_state_dict(checkpoint["model"])
-        if "optimizer" in checkpoint:
-            self.optimizer["finetuning"].load_state_dict(checkpoint["optimizer"])
+    # ToDo: check this
+    def fit_transform(self, df):
+        """
+        preprocess the data
+
+        Parameters
+        ----------
+        df: pd.DataFrame
+            the data to be preprocessed
+
+        Returns
+        -------
+        data: np.ndarray
+            preprocessed data
+        
+        group: np.ndarray
+            preprocessed group
+
+        label: np.ndarray
+            preprocessed label
+
+        """
+        # prepare meta data and converter
+        # group and label are assumed to be 1DS
+        # label is converted to integer
+        if self.key_label is None:
+            group = df[self.key_group].values
+            unique_group = np.unique(group)
+            self.lut = pd.DataFrame(
+                {"raw_index":list(range(len(unique_group))), "group": unique_group}
+                )
+            self.lut.loc[:, "label0"] = None
+            self.lut.loc[:, "label"] = None
+            converted_label = None
+        else:
+            # convert label to integer
+            label0 = list(df[self.key_label].unique())
+            label1 = list(range(len(label0)))
+            label_encoder = dict(zip(label0, label1))
+            converted_label = np.array([label_encoder[k] for k in list(df[self.key_label])])
+            # store lookup table
+            group2label = dict(zip(list(df[self.key_group]), list(df[self.key_label])))
+            self.lut = pd.DataFrame(
+                {
+                    "raw_index":list(range(len(group2label))),
+                    "group": list(group2label.keys()),
+                    "label0": list(group2label.values())}
+                )
+            self.lut["label"] = self.lut["label0"].map(label_encoder)
+        dic_group = dict(zip(list(self.lut["group"]), list(self.lut["raw_index"])))
+        converted_group = np.array([dic_group[k] for k in list(df[self.key_group])])
+        self.num_data = self.lut.shape[0] # number of data
+        # data
+        data = df[self.key_data].values
+        data = data.astype(np.float32)
+        # register
+        self.data = data
+        self.group = converted_group
+        self.label = converted_label
+        return data, converted_group, converted_label
+
+
+    def get_lut(self) -> pd.DataFrame:
+        """
+        get lookup table
+                
+        """
+        assert self.lut is not None, "!! fit_transform first !!"
+        return self.lut
+    
+
+    def check_transform(
+            self, raw_data, group, indices:list=[], num_points:int=4096, bins:int=64,
+            **plot_params
+            ):
+        """
+        check transform
+
+        Parameters
+        ----------
+        raw_data: np.ndarray
+            the data to be checked
+
+        indices: list
+            the list of indices to be checked
+
+        """
+        list_hist = []
+        list_raw = []
+        list_title = []
+        for idx in indices:
+            # raw data
+            mask = np.where(group == idx)[0]
+            raw = raw_data[mask]
+            # converted data
+            hist = self.to_hist(raw_data, group, idx, num_points=num_points, bins=bins)
+            # summary
+            list_raw.append(raw)
+            list_hist.append(hist)
+            list_title.append(f"Group_{idx}")
+        # plot
+        plot_scatter(points_list=list_raw, title_list=list_title, **plot_params)
+        plot_hist(hist_list=list_hist, title_list=list_title, **plot_params)
+
+
+    def to_hist(self, raw_data, group, idx:int, num_points:int=4096, bins=64):
+        """
+        convert to histogram
+
+        """
+        selected_indices = np.where(group == idx)[0]
+        pointcloud = raw_data[selected_indices]
+        if pointcloud.shape[0] > num_points:
+            idxs0 = np.random.choice(pointcloud.shape[0], num_points, replace=False)
+            pointcloud0 = pointcloud[idxs0, :]
+        else:
+            idxs0 = np.random.choice(pointcloud.shape[0], num_points, replace=True)
+            pointcloud0 = pointcloud[idxs0, :]
+        # prepare histogram
+        hist0 = calc_hist(pointcloud0, bins=bins)
+        # normalize the histogram
+        hist0 = np.log1p(hist0) # log1p for numerical stability
+        tmp = np.max(hist0) # store the max value for normalization
+        hist0 = hist0 / tmp # normalize
+        return hist0
+
+
+def calc_hist(X, bins=16):
+    try:
+        s = X.shape[1]
+    except IndexError:
+        s = 1
+    if s == 1:
+        hist, _ = np.histogram(X, bins=bins, density=False)
+    elif s == 2:
+        hist, _, _ = np.histogram2d(X[:, 0], X[:, 1], bins=bins, density=False)
+    elif s == 3:
+        hist, _ = np.histogramdd(X, bins=bins, density=False)
+    else:
+        raise ValueError("!! Input array must be 1D, 2D, or 3D. !!")
+    return hist
+
+
+def plot_hist(hist_list, output="", **plot_params):
+    """
+    Plot histograms (1D, 2D).
+
+    Parameters:
+    ----------
+    hist_list : list of np.ndarray
+        List of histograms to plot.
+
+    output : str, optional
+        File path to save the plot (default: "", meaning no save).
+
+    **plot_params : dict, optional
+        Dictionary containing plot customization options:
+            - xlabel (str): Label for x-axis
+            - ylabel (str): Label for y-axis
+            - title_list (list of str): Titles for each subplot
+            - cmap (str): Colormap for 2D histograms
+            - aspect (str): Aspect ratio for 2D histograms (default: 'equal')
+            - color (str): Bar color for 1D histograms (default: 'royalblue')
+            - alpha (float): Transparency for 1D histograms (default: 0.7)
+    """
+    # Default plot parameters
+    default_params = {
+        "nrow": 1,
+        "ncol": 3,
+        "xlabel": "x",
+        "ylabel": "y",
+        "title_list": None,
+        "cmap": "viridis",
+        "aspect": "equal",
+        "color": "royalblue",
+        "alpha": 0.7
+    }
+    # merge default and custom params
+    params = {**default_params, **plot_params}
+    num_plots = len(hist_list)
+    nrow, ncol = params["nrow"], params["ncol"]
+    fig, axes = plt.subplots(nrow, ncol, figsize=(5 * ncol, 5 * nrow))
+    axes = np.atleast_1d(axes).flatten()  # Flatten for easy iteration
+    for i, hist in enumerate(hist_list):
+        ax = axes[i]
+        dim = hist.ndim  # Detect dimensionality
+        if dim == 1:
+            ax.bar(range(len(hist)), hist, width=0.8, color=params["color"], alpha=params["alpha"])
+            ax.set_xlabel(params["xlabel"])
+            ax.set_ylabel(params["ylabel"])
+            ax.set_title(params["title_list"][i] if params["title_list"] else f'1D Histogram {i+1}')
+        elif dim == 2:
+            im = ax.imshow(hist.T, origin='lower', cmap=params["cmap"], aspect=params["aspect"])
+            fig.colorbar(im, ax=ax, label=params["ylabel"])
+            ax.set_xlabel(params["xlabel"])
+            ax.set_ylabel(params["ylabel"])
+            ax.set_title(params["title_list"][i] if params["title_list"] else f'2D Histogram {i+1}')
+        else:
+            raise NotImplementedError("Only 1D and 2D histograms are supported.")
+    # Remove unused subplots
+    for j in range(num_plots, len(axes)):
+        fig.delaxes(axes[j])
+    plt.tight_layout()
+    if output:
+        plt.savefig(output)
+    plt.show()
+    plt.close()
+
+
+def plot_scatter(points_list, output="", **plot_params):
+    """
+    Plot scatter plots from list of 2D point arrays.
+
+    Parameters
+    ----------
+    points_list : list of np.ndarray
+        List of 2D point arrays (each of shape (N, 2)).
+
+    output : str, optional
+        File path to save the plot (default: "", meaning no save).
+
+    **plot_params : dict, optional
+        Plot customization options:
+            - xlabel (str): Label for x-axis
+            - ylabel (str): Label for y-axis
+            - title_list (list of str): Titles for each subplot
+            - color (str): Point color (default: 'royalblue')
+            - alpha (float): Point transparency (default: 0.7)
+            - s (float): Point size (default: 10)
+            - nrow (int): Number of rows in subplot grid
+            - ncol (int): Number of columns in subplot grid
+    """
+    # Default parameters
+    default_params = {
+        "nrow": 1,
+        "ncol": 3,
+        "xlabel": "x",
+        "ylabel": "y",
+        "title_list": None,
+        "color": "royalblue",
+        "alpha": 0.7,
+        "s": 10
+    }
+    params = {**default_params, **plot_params}
+    num_plots = len(points_list)
+    nrow, ncol = params["nrow"], params["ncol"]
+    fig, axes = plt.subplots(nrow, ncol, figsize=(5 * ncol, 5 * nrow))
+    axes = np.atleast_1d(axes).flatten()  # Flatten to 1D array for iteration
+    for i, points in enumerate(points_list):
+        ax = axes[i]
+        if points.ndim != 2 or points.shape[1] != 2:
+            raise ValueError(f"Expected shape (N, 2), got {points.shape}")
+        ax.scatter(points[:, 0], points[:, 1],
+                   color=params["color"],
+                   alpha=params["alpha"],
+                   s=params["s"])
+        ax.set_xlabel(params["xlabel"])
+        ax.set_ylabel(params["ylabel"])
+        ax.set_title(params["title_list"][i] if params["title_list"] else f'Scatter {i+1}')
+        ax.grid(True)
+    # Remove any unused subplots
+    for j in range(num_plots, len(axes)):
+        fig.delaxes(axes[j])
+    plt.tight_layout()
+    if output:
+        plt.savefig(output)
+    plt.show()
+    plt.close()

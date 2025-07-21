@@ -8,25 +8,87 @@ data handler
 """
 import numpy as np
 import pandas as pd
+import random
 import matplotlib.pyplot as plt
+import inspect
 
 import torch
 from torch.utils.data import Dataset, DataLoader
+import torchvision.transforms.functional as TF
 
-def calc_hist(X, bins=16) -> np.ndarray:
-    try:
-        s = X.shape[1]
-    except IndexError:
-        s = 1
-    if s == 1:
-        hist, _ = np.histogram(X, bins=bins, density=False)
-    elif s == 2:
-        hist, _, _ = np.histogram2d(X[:, 0], X[:, 1], bins=bins, density=False)
-    elif s == 3:
-        hist, _ = np.histogramdd(X, bins=bins, density=False)
-    else:
-        raise ValueError("!! Input array must be 1D, 2D, or 3D. !!")
-    return hist
+# functions
+class Histogram:
+    """
+    A class optimized to compute histograms efficiently without repeated dimension checks.
+    """
+
+    def __init__(self, dimension, max_vals, bins_per_dim):
+        """
+        Initialize the Histogram object with the optimal histogram function based on dimension.
+
+        Parameters:
+        -----------
+        dimension : int
+            The dimension of the input data (1, 2, or >=3).
+
+        max_vals : list or np.ndarray
+            Maximum values for each dimension.
+
+        bins_per_dim : int or list
+            Number of bins for each dimension.
+        """
+        self.dimension = dimension
+        self.max_vals = np.asarray(max_vals)
+
+        if isinstance(bins_per_dim, int):
+            bins_per_dim = [bins_per_dim] * dimension
+
+        self.bins_per_dim = bins_per_dim
+
+        # Precompute bin edges based on dimensions
+        self.edges = [
+            np.linspace(0, self.max_vals[dim], self.bins_per_dim[dim] + 1)
+            for dim in range(dimension)
+        ]
+
+        # Pre-select histogram function based on dimension
+        if self.dimension == 1:
+            self.hist_func = self._hist_1d
+        elif self.dimension == 2:
+            self.hist_func = self._hist_2d
+        else:
+            self.hist_func = self._hist_nd
+
+    def _hist_1d(self, data):
+        hist, _ = np.histogram(data, bins=self.edges[0])
+        return hist
+
+    def _hist_2d(self, data):
+        hist, _, _ = np.histogram2d(
+            data[:, 0], data[:, 1],
+            bins=[self.edges[1], self.edges[0]]
+        )
+        return hist
+
+    def _hist_nd(self, data):
+        hist, _ = np.histogramdd(data, bins=self.edges)
+        return hist
+
+    def compute(self, data):
+        """
+        Compute histogram using the pre-selected histogram function.
+
+        Parameters:
+        -----------
+        data : np.ndarray
+            Data array of shape (n_samples, dimension).
+
+        Returns:
+        --------
+        hist : np.ndarray
+            Computed histogram.
+        """
+        return self.hist_func(data)
 
 
 def plot_hist(hist_list, output="", **plot_params):
@@ -37,8 +99,10 @@ def plot_hist(hist_list, output="", **plot_params):
     ----------
     hist_list : list of np.ndarray
         List of histograms to plot.
+
     output : str, optional
         File path to save the plot (default: "", meaning no save).
+
     **plot_params : dict, optional
         Dictionary containing plot customization options:
             - xlabel (str): Label for x-axis
@@ -95,65 +159,83 @@ def plot_hist(hist_list, output="", **plot_params):
 
 class PointHistDataset(Dataset):
     def __init__(
-            self, df, key_identify, key_data, key_label, num_points=768, bins=16,
-            noise=None, transform=None
+            self, data, group, label=None, max_vals=(), transform=False,
+            num_points=768, bins=64, transform_params=None
             ):
         """
         Parameters
         ----------
-        df: pd.DataFrame
-            DataFrame containing the data and label
+        data: np.ndarray
+            the data to be used for training
 
-        key_identify: str
-            the key to identify the data
+        group: np.ndarray
+            the group to which the data belongs
+        
+        label: np.ndarray
+            the label of the data
+        
+        max_vals: tuple
+            the maximum values for each dimension of the data
 
-        key_data: list
-            the keys for the data
-
-        key_label: int
-            the key for the label
-            note that the label should be integer
+        transform: bool
+            whether to apply transform to the data
 
         bins: int
             the number of bins for the histogram
 
         num_points: int
             the number of points to be sampled
-
-        noise: float
-            the noise to be added to the histogram
-
-        transform: callable
-            the transform function to be applied to the data
         
         """
-        self.df = df
+        super().__init__()
+        # check the input
+        assert data.shape[0] == group.shape[0] == label.shape[0], "!! data, group, and label must have the same number of samples !!"
+        assert len(max_vals) == data.shape[1], "!! max_vals must have the same number of dimensions as data !!"
+        self.data = data
+        self.group = group
+        self.label = label
         self.bins = bins
         self.num_points = num_points
-        self.noise = noise
-        if noise is None:
-            self.noise = 1 / num_points
+        self.ndim = data.shape[1]
+        self.max_vals = max_vals
+        # tie the group to the data
+        self.unique_groups = np.unique(group)
+        self.idx2group = {i: j for i, j in enumerate(self.unique_groups)} # map index in the dataset to the group
+        self.group2idx = {v: k for k, v in self.idx2group.items()} # map group to index in the dataset
+        self.num_data = len(self.unique_groups)
         self.transform = transform
-        # prepare meta data
-        self.key_identify = key_identify
-        identifier = list(df[key_identify].unique())
-        self.idx2id = {k: v for k, v in enumerate(identifier)} # index to identifier
-        self.num_data = len(identifier) # number of data
-        # prepare data
-        self.key_data = key_data
-        # prepare label
-        self.key_label = key_label
-        self.id2label = dict(zip(df[key_identify], df[key_label]))
+        if transform:
+            if transform_params is not None:
+                trans = PCAugmentation(**transform_params)
+            else:
+                trans = PCAugmentation()
+            self._transform_fxn = trans
+        else:
+            self._transform_fxn = lambda x: x
+        # prepare histogram
+        self.hist = Histogram(self.ndim, max_vals, bins)
+        # store normalization parameters
+        # note: Dataset cannnot modify the data, so we need to store the normalization parameters
+        self.log1p_max = dict()
+        for i in range(self.num_data):
+            group_idx = self.idx2group[i]
+            selected_indices = np.where(self.group == group_idx)[0]
+            pointcloud = self.data[selected_indices]
+            hist = self._calc_hist(pointcloud)
+            hist = np.log1p(hist)
+            tmp = np.max(hist) # store the max value for normalization
+            self.log1p_max[group_idx] = tmp
 
-    def __len__(self) -> int:
+
+    def __len__(self):
         return self.num_data
 
-    def __getitem__(self, idx) -> tuple:
-        # get data
-        key = self.idx2id[idx]
-        data = self.df[self.df[self.key_identify] == key]
-        # get point cloud
-        pointcloud = np.array(data[self.key_data], dtype=np.float32)
+
+    def __getitem__(self, idx):
+        # get the indicated data
+        group_idx = self.idx2group[idx]
+        selected_indices = np.where(self.group == group_idx)[0]
+        pointcloud = self.data[selected_indices]
         # limit the number of points if necessary (random sampling)
         if pointcloud.shape[0] > self.num_points:
             idxs0 = np.random.choice(pointcloud.shape[0], self.num_points, replace=False)
@@ -165,84 +247,217 @@ class PointHistDataset(Dataset):
             pointcloud0 = pointcloud[idxs0, :]
             idxs1 = np.random.choice(pointcloud.shape[0], self.num_points, replace=True)
             pointcloud1 = pointcloud[idxs1, :]
-        # transform
-        if self.transform:
-            pointcloud0 = self.transform(pointcloud0)
-            pointcloud1 = self.transform(pointcloud1)
         # prepare histogram
-        hist0 = calc_hist(pointcloud0, bins=self.bins) / self.num_points
-        hist1 = calc_hist(pointcloud1, bins=self.bins) / self.num_points
-        hist1 = self.add_noise(hist1, self.noise) # add noise to the histogram
-        hist0 = torch.tensor(hist0, dtype=torch.float32).unsqueeze(0) # add channel dimension
-        hist1 = torch.tensor(hist1, dtype=torch.float32).unsqueeze(0) # add channel dimension
+        hist0 = self._calc_hist(pointcloud0)
+        hist1 = self._calc_hist(pointcloud1)
+        # normalize the histogram
+        hist0 = self._normalize_hist(hist0, group_idx)
+        hist1 = self._normalize_hist(hist1, group_idx)
+        # transform
+        hist1 = self._transform_fxn(hist1) # hist1 only like translation
+        # add channel dimension
+        hist0 = hist0.unsqueeze(0)
+        hist1 = hist1.unsqueeze(0)
         # prepare label
-        label = self.id2label[key]
-        try:
-            label = torch.tensor(label, dtype=torch.long)
-        except ValueError:
-            pass # if label is None
+        if self.label is not None:
+            label = self.label[selected_indices][0]
+            label = torch.tensor(label, dtype=torch.int64)
+        else:
+            label = None
+        # return the data
         return (hist0, hist1), label
-    
-    def get_meta(self) -> pd.DataFrame:
+        # hist0, original; hist1, noisy
+
+
+    def _calc_hist(self, data):
         """
-        get meta data that contains:
-            - index
-            - identifier
-            - label
+        Calculate the histogram of the data.
+
+        Parameters
+        ----------
+        data: np.ndarray
+            the data to be used for training
+
+        Returns
+        -------
+        hist: np.ndarray
+            the histogram of the data
+
+        """
+        hist = self.hist.compute(data)
+        return hist
+
+
+    def _normalize_hist(self, hist, group_idx):
+        """
+        Normalize the histogram.
         
         """
-        meta = pd.DataFrame({
-            "index": list(range(self.num_data)),
-            "identifier": list(self.idx2id.values()),
-            "label": [self.id2label[k] for k in self.idx2id.values()]
-            })
-        return meta
+        hist = np.log1p(hist)
+        max_val = self.log1p_max[group_idx]
+        hist = hist / (max_val + 1e-6)
+        return torch.tensor(hist, dtype=torch.float32)
 
 
-    def add_noise(self, hist, noise=0.001):
+    def transform_on(self, **transform_params):
         """
-        add noise to the histogram
+        transform on
+
         """
-        noise = np.random.normal(0, noise, hist.shape)
-        noise = np.where(hist > 0, noise, 0.0)
-        hist += noise
-        return np.clip(hist, 0.0, None)
+        self.transform = True
+        trans = PCAugmentation(**transform_params)
+        self._transform_fxn = trans
 
 
-def prep_dataloader(
-    dataset, batch_size, shuffle=None, num_workers=2, pin_memory=True,
-    g=None, seed_worker=None
-    ) -> DataLoader:
-    """
-    prepare train and test loader
-    
-    Parameters
-    ----------
-    dataset: torch.utils.data.Dataset
-        prepared Dataset instance
-    
-    batch_size: int
-        the batch size
-    
-    shuffle: bool
-        whether data is shuffled or not
+    def transform_off(self):
+        """
+        transform off
 
-    num_workers: int
-        the number of threads or cores for computing
-        should be greater than 2 for fast computing
+        """
+        self.transform = False
+        self._transform_fxn = lambda x: x
+
+# ToDo test this
+class PCAugmentation:
+    def __init__(self,
+                 jitter_sigma=0.01,   # Standard deviation of jitter noise (adjustable)
+                 jitter_clip=0.03,    # Maximum jitter noise magnitude
+                 scale_range=(0.98, 1.02),  # Scaling range (restricted within ±2%)
+                 translate_range=0.05,      # Translation range (small absolute range)
+                 ):
+        self.jitter_sigma = jitter_sigma
+        self.jitter_clip = jitter_clip
+        self.scale_range = scale_range
+        self.translate_range = translate_range
+
+    def jitter(self, points):
+        jitter_noise = torch.clamp(
+            self.jitter_sigma * torch.randn_like(points),
+            -self.jitter_clip,
+            self.jitter_clip
+        )
+        points_jittered = points + jitter_noise
+        # Clip negative values to zero since coordinates must be positive
+        return torch.clamp(points_jittered, min=0)
+
+    def scale(self, points):
+        scale = torch.empty(1).uniform_(*self.scale_range).to(points.device)
+        return points * scale
+
+    def translate(self, points):
+        translation = torch.empty(points.size(-1)).uniform_(
+            -self.translate_range,
+            self.translate_range
+        ).to(points.device)
+        points_translated = points + translation
+        # Clip negative values to zero
+        return torch.clamp(points_translated, min=0)
+
+    def __call__(self, points):
+        points = self.jitter(points)
+        points = self.scale(points)
+        points = self.translate(points)
+        return points
+
+
+class PointHistDataLoader(DataLoader):
+    def __init__(
+            self, dataset, batch_size, shuffle=False, num_workers=2,
+            pin_memory=True, generator=None, worker_init_fn=None
+            ):
+        """
+        My DataLoader to support the custom dataset
+        
+        """
+        super().__init__(
+            dataset=dataset,
+            batch_size=batch_size,
+            shuffle=shuffle,
+            num_workers=num_workers,
+            pin_memory=pin_memory,
+            generator=generator,
+            worker_init_fn=worker_init_fn,
+            )
+
+
+class DataHandler:
+    def __init__(self, config:dict):
+        assert isinstance(config, dict), "!! config must be a dictionary !!"
+        self.config = config
+
+
+    def make_dataset(self, data, group, label=None, transform=False):
+        """
+        make dataset for training and testing
+
+        """
+        # check the input
+        assert data.shape[0] == group.shape[0], "!! data, group, and label must have the same number of samples !!"
+        if label is not None:
+            assert data.shape[0] == label.shape[0], "!! data, group, and label must have the same number of samples !!"
+        # prepare params
+        ds_params = inspect.signature(PointHistDataset.__init__).parameters # diff
+        ds_args = {k: self.config[k] for k in ds_params if k in self.config}
+        # integrate arguments
+        ds_args.update({
+            "data": data,
+            "group": group,
+        })
+        if label is not None:
+            ds_args["label"] = label
+        if transform is not None:
+            ds_args["transform"] = transform
+        # create dataset
+        dataset = PointHistDataset(**ds_args)
+        return dataset
+
+
+    def make_dataloader(self, dataset, mode="train"):
+        """
+        prepare train and test loader
+        
+        Parameters
+        ----------
+        dataset: torch.utils.data.Dataset
+            prepared Dataset instance
+
+        mode: str
+            "train" or "test"
+                
+        """
+        # check the input
+        assert isinstance(dataset, Dataset), "!! dataset must be a torch.utils.data.Dataset !!"
+        assert mode in ["train", "test"], "!! mode must be 'train' or 'test' !!"
+        # create dataloader
+        dl_params = inspect.signature(PointHistDataLoader.__init__).parameters
+        # note: only child class PointHistDataLoader arguments are extracted
+        dl_args = {k: self.config[k] for k in dl_params if k in self.config and k not in ["dataset", "shuffle"]}
+        shuffle = True if mode == "train" else False
+        # integrate arguments
+        dl_args["dataset"] = dataset
+        dl_args["shuffle"] = shuffle
+        loader = PointHistDataLoader(**dl_args)
+        return loader
     
-    pin_memory: bool
-        determines use of memory pinning
-        should be True for fast computing
-    
-    """
-    loader = torch.utils.data.DataLoader(
-        dataset,
-        batch_size=batch_size,
-        shuffle=shuffle,
-        num_workers=num_workers,
-        pin_memory=pin_memory,
-        generator=g,
-        worker_init_fn=seed_worker,
-        )    
-    return loader
+
+    def make_lut(self, dataset):
+        """
+        make lookup table for the dataset
+
+        Parameters
+        ----------
+        dataset: torch.utils.data.Dataset
+            prepared Dataset instance
+
+        Returns
+        -------
+        lut: dict
+            lookup table for the dataset
+        
+        """
+        lut = {}
+        for i in range(len(dataset)):
+            group = dataset.idx2group[i]
+            lut[group] = i
+        lut = pd.DataFrame({"group": list(lut.keys()), "idx": list(lut.values())})
+        return lut
