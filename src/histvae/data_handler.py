@@ -14,7 +14,6 @@ import inspect
 
 import torch
 from torch.utils.data import Dataset, DataLoader
-import torchvision.transforms.functional as TF
 
 # functions
 class Histogram:
@@ -91,7 +90,7 @@ class Histogram:
         return self.hist_func(data)
 
 
-def plot_hist(hist_list, output="", **plot_params):
+def plot_hist(hist_list, output="", show: bool=False, **plot_params):
     """
     Plot histograms (1D, 2D).
 
@@ -153,7 +152,8 @@ def plot_hist(hist_list, output="", **plot_params):
     plt.tight_layout()
     if output:
         plt.savefig(output)
-    plt.show()
+    if show:
+        plt.show()
     plt.close()
 
 
@@ -189,7 +189,9 @@ class PointHistDataset(Dataset):
         """
         super().__init__()
         # check the input
-        assert data.shape[0] == group.shape[0] == label.shape[0], "!! data, group, and label must have the same number of samples !!"
+        assert data.shape[0] == group.shape[0], "!! data and group must have the same number of samples !!"
+        if label is not None:
+            assert data.shape[0] == label.shape[0], "!! data, group, and label must have the same number of samples !!"
         assert len(max_vals) == data.shape[1], "!! max_vals must have the same number of dimensions as data !!"
         self.data = data
         self.group = group
@@ -361,6 +363,18 @@ class PCAugmentation:
 
 
 class PointHistDataLoader(DataLoader):
+    @staticmethod
+    def _collate_fn(batch):
+        data = [item[0] for item in batch]
+        labels = [item[1] for item in batch]
+        hist0 = torch.stack([item[0] for item in data], dim=0)
+        hist1 = torch.stack([item[1] for item in data], dim=0)
+        if labels[0] is None:
+            label_batch = torch.full((len(labels),), -1, dtype=torch.int64)
+        else:
+            label_batch = torch.stack(labels, dim=0)
+        return (hist0, hist1), label_batch
+
     def __init__(
             self, dataset, batch_size, shuffle=False, num_workers=2,
             pin_memory=True, generator=None, worker_init_fn=None
@@ -377,6 +391,7 @@ class PointHistDataLoader(DataLoader):
             pin_memory=pin_memory,
             generator=generator,
             worker_init_fn=worker_init_fn,
+            collate_fn=self._collate_fn,
             )
 
 

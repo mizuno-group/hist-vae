@@ -6,11 +6,17 @@ utils
 
 @author: tadahaya
 """
-import json, os, time, yaml
+import json
+import os
 import random
-import numpy as np
+import time
+from collections.abc import Mapping
+from importlib.resources import files
+
 import matplotlib.pyplot as plt
+import numpy as np
 import torch
+import yaml
 
 
 def fix_seed(seed: int=42, fix_cuda: bool=False):
@@ -41,6 +47,73 @@ def fix_seed(seed: int=42, fix_cuda: bool=False):
     g = torch.Generator()
     g.manual_seed(seed)
     return g, seed_worker  # for worker_init_fn in DataLoader
+
+
+
+def get_default_config_path():
+    """Return the packaged default config.yaml path."""
+    return str(files("histvae").joinpath("config.yaml"))
+
+
+
+def load_default_config():
+    """Load the packaged default config.yaml."""
+    config_path = get_default_config_path()
+    with open(config_path, "r") as f:
+        config = yaml.safe_load(f) or {}
+    return config, config_path
+
+
+
+def merge_config(base: dict, override: dict | None):
+    """Recursively merge config dictionaries without mutating the inputs."""
+    merged = dict(base)
+    if not override:
+        return merged
+    for key, value in override.items():
+        if isinstance(value, Mapping) and isinstance(merged.get(key), Mapping):
+            merged[key] = merge_config(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
+
+def load_config(config_path: str=None, overrides: dict | None=None):
+    """
+    Load config with layered overrides.
+
+    Order:
+    1. packaged default config
+    2. optional user-provided YAML config
+    3. optional runtime overrides
+    """
+    config, default_config_path = load_default_config()
+    resolved_user_config = None
+
+    if config_path is not None:
+        with open(config_path, "r") as f:
+            user_config = yaml.safe_load(f) or {}
+        config = merge_config(config, user_config)
+        resolved_user_config = str(config_path)
+
+    if overrides:
+        config = merge_config(config, overrides)
+
+    meta = {
+        "default_config_path": default_config_path,
+        "user_config_path": resolved_user_config,
+    }
+    return config, meta
+
+
+
+def load_yaml_config(config_path: str=None):
+    """Backward-compatible wrapper around load_config()."""
+    config, meta = load_config(config_path=config_path)
+    resolved_path = meta["user_config_path"] or meta["default_config_path"]
+    return config, resolved_path
+
 
 
 def save_experiment(config, model, optimizer, history, outdir, plot_progress=True):
@@ -78,6 +151,7 @@ def save_experiment(config, model, optimizer, history, outdir, plot_progress=Tru
         )
 
 
+
 def save_checkpoint(model, optimizer, name, outdir):
     """
     save the model checkpoint
@@ -91,6 +165,7 @@ def save_checkpoint(model, optimizer, name, outdir):
         },
         cpfile
     )
+
 
 
 def load_experiments(model, optimizer, resdir, checkpoint_name="model_final"):
@@ -117,7 +192,7 @@ def load_experiments(model, optimizer, resdir, checkpoint_name="model_final"):
     with open(configfile, 'r') as f:
         config = yaml.safe_load(f)
     # load history
-    historyfile = os.path.join(resdir, 'hisotry.json')
+    historyfile = os.path.join(resdir, 'history.json')
     with open(historyfile, 'r') as f:
         history = json.load(f)
     # load model
@@ -125,6 +200,7 @@ def load_experiments(model, optimizer, resdir, checkpoint_name="model_final"):
     model.load_state_dict(pkg["model"])
     optimizer.load_state_dict(pkg["optimizer"])
     return model, optimizer, config, history
+
 
 
 def progress_plot(
@@ -145,8 +221,8 @@ def progress_plot(
     ax.legend()
     plt.tight_layout()
     plt.savefig(fileout, dpi=300, bbox_inches='tight')
-    plt.show()
-    plt.close()
+    plt.close(fig)
+
 
 
 def calc_elapsed_time(start_time):

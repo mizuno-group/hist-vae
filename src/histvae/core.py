@@ -10,17 +10,27 @@ a class specific to the model
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from schedulefree import RAdamScheduleFree
+try:
+    from schedulefree import RAdamScheduleFree
+except ImportError:  # pragma: no cover - optional dependency fallback
+    class RAdamScheduleFree(optim.RAdam):
+        """Compatibility fallback when schedulefree is unavailable."""
+
+        def train(self):
+            return self
+
+        def eval(self):
+            return self
 import numpy as np
 import pandas as pd
 import os, yaml
 from matplotlib import pyplot as plt
 from datetime import datetime
 
-from .src.models import ModelHandler
-from .src.trainer import PreTrainer, FineTuner
-from .src.data_handler import DataHandler, plot_hist
-from .src.utils import fix_seed
+from .models import ModelHandler
+from .trainer import PreTrainer, FineTuner
+from .data_handler import DataHandler, plot_hist
+from .utils import fix_seed
 
 class HistVAE:
     def __init__(
@@ -147,14 +157,26 @@ class HistVAE:
             print(">> Training is done.")
 
 
-    # ToDo: check this
     def predict(self, data_loader=None):
-        """ prediction """
+        """Run classifier inference with a fine-tuned model.
+
+        Parameters
+        ----------
+        data_loader: torch.utils.data.DataLoader
+            DataLoader that yields ``((hist0, hist1), label)``.
+
+        Returns
+        -------
+        preds, probs, labels: np.ndarray
+            Predicted class indices, classifier logits, and labels.
+        """
         if data_loader is None:
             raise ValueError("!! Give data_loader !!")
         if self.model is None:
             raise ValueError("!! fit or load_model first !!")
-        self.finetuned_model.eval()
+        if self.loss_fn is None:
+            raise RuntimeError("!! predict is only available after prep_model('finetune') !!")
+        self.model.eval()
         preds = []
         probs = []
         labels = []
@@ -231,7 +253,6 @@ class HistVAE:
         plot_hist(hist_list, output, **plot_params)
 
 
-    # ToDo: check this
     def qual_eval(self, dataset, query_indices, outdir:str=""):
         """
         qualitative evaluation
@@ -298,7 +319,6 @@ class Preprocess:
         self.label = None
 
 
-    # ToDo: check this
     def fit_transform(self, df):
         """
         preprocess the data
@@ -441,7 +461,7 @@ def calc_hist(X, bins=16):
     return hist
 
 
-def plot_hist(hist_list, output="", **plot_params):
+def plot_hist(hist_list, output="", show: bool=False, **plot_params):
     """
     Plot histograms (1D, 2D).
 
@@ -503,11 +523,12 @@ def plot_hist(hist_list, output="", **plot_params):
     plt.tight_layout()
     if output:
         plt.savefig(output)
-    plt.show()
+    if show:
+        plt.show()
     plt.close()
 
 
-def plot_scatter(points_list, output="", **plot_params):
+def plot_scatter(points_list, output="", show: bool=False, **plot_params):
     """
     Plot scatter plots from list of 2D point arrays.
 
